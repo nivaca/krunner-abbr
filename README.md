@@ -37,6 +37,15 @@ such as `{clipboard|unhyphen|join}`, `{input|replace(" ", "_")}` or
 `{clipboard|sh(sort -u)}`. `{input}` is the text typed after the abbreviation, or the
 clipboard if nothing was typed.
 
+Other bundled examples: LaTeX/Markdown wrappers (`emph`, `cite`, `latex`, `mdlink`,
+`guil`), Latin helpers (`annus`, `roman`, `unroman`, `macrons`), `wc` (word count),
+`on next friday` (plain-English dates) and symbols (`em`, `en`, `sect`, `para`, `check`).
+
+Slow abbreviations can set `lazy = true` ("Compute only when Enter is pressed" in the
+dialog): KRunner shows the description instead of a live result, and the expansion runs
+in the background when you press Enter, with a notification when it lands on the
+clipboard. The bundled `bib` uses this to fetch BibTeX for a typed or copied DOI.
+
 ## Testing from the shell
 
     ./krunner_abbr.py --list          # every abbreviation with its current expansion

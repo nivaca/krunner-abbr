@@ -16,7 +16,7 @@ import tomllib
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
+    QApplication, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTabWidget, QToolButton,
     QVBoxLayout, QWidget,
@@ -65,6 +65,7 @@ def load_config(path) -> tuple[dict, list[dict]]:
             "text": val.get("text", ""),
             "description": val.get("description", ""),
             "icon": val.get("icon", ""),
+            "lazy": bool(val.get("lazy", False)),
         })
     return settings, entries
 
@@ -104,8 +105,8 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
         "[abbr]",
     ]
     # plain key = value pairs must precede sub-tables in TOML
-    simple = [e for e in entries if not e["description"] and not e["icon"]]
-    tables = [e for e in entries if e["description"] or e["icon"]]
+    simple = [e for e in entries if not (e["description"] or e["icon"] or e["lazy"])]
+    tables = [e for e in entries if e["description"] or e["icon"] or e["lazy"]]
     out += [f"{toml_key(e['key'])} = {toml_str(e['text'])}" for e in simple]
     for e in tables:
         out += ["", f"[abbr.{toml_key(e['key'])}]", f"text = {toml_str(e['text'])}"]
@@ -113,6 +114,8 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
             out.append(f"description = {toml_str(e['description'])}")
         if e["icon"]:
             out.append(f"icon = {toml_str(e['icon'])}")
+        if e["lazy"]:
+            out.append("lazy = true")
     return "\n".join(out) + "\n"
 
 
@@ -259,6 +262,13 @@ class SettingsDialog(QDialog):
         form.addRow("Abbreviation:", self.key_edit)
         form.addRow("Description:", self.desc_edit)
         form.addRow("Icon:", icon_row)
+        self.lazy_check = QCheckBox("Compute only when Enter is pressed")
+        self.lazy_check.setToolTip(
+            "For slow or networked commands: KRunner shows the description instead of a "
+            f"live preview, and the result is copied (with a notification) when you press "
+            f"Enter. Commands may then run for up to {k.LAZY_TIMEOUT:.0f} s."
+        )
+        form.addRow("", self.lazy_check)
         text_label = QWidget()
         tl = QVBoxLayout(text_label)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -267,11 +277,20 @@ class SettingsDialog(QDialog):
         tl.addStretch()
         form.addRow(text_label, self.text_edit)
         form.addRow("Test argument:", self.arg_edit)
-        form.addRow("Preview:", self.preview)
+        self.run_now_btn = QPushButton(QIcon.fromTheme("system-run"), "Run Now")
+        self.run_now_btn.clicked.connect(lambda: self.update_preview(force=True))
+        preview_label = QWidget()
+        pl = QVBoxLayout(preview_label)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.addWidget(QLabel("Preview:"))
+        pl.addWidget(self.run_now_btn)
+        pl.addStretch()
+        form.addRow(preview_label, self.preview)
 
         self.key_edit.textChanged.connect(self._entry_changed)
         self.desc_edit.textChanged.connect(self._entry_changed)
         self.icon_edit.textChanged.connect(self._entry_changed)
+        self.lazy_check.toggled.connect(self._entry_changed)
         self.text_edit.textChanged.connect(self._entry_changed)
         self.arg_edit.textChanged.connect(lambda: self.preview_timer.start())
 
@@ -420,6 +439,7 @@ class SettingsDialog(QDialog):
         self.key_edit.setText(e["key"] if e else "")
         self.desc_edit.setText(e["description"] if e else "")
         self.icon_edit.setText(e["icon"] if e else "")
+        self.lazy_check.setChecked(bool(e and e["lazy"]))
         self.text_edit.setPlainText(e["text"] if e else "")
         self.loading = False
         self._update_icon_preview()
@@ -431,6 +451,7 @@ class SettingsDialog(QDialog):
         e["key"] = self.key_edit.text().strip()
         e["description"] = self.desc_edit.text()
         e["icon"] = self.icon_edit.text().strip()
+        e["lazy"] = self.lazy_check.isChecked()
         e["text"] = self.text_edit.toPlainText()
         self._refresh_item(self.list.currentItem(), e)
         self._update_icon_preview()
@@ -457,7 +478,7 @@ class SettingsDialog(QDialog):
         n = 1
         while f"new{n}" in existing:
             n += 1
-        self._insert_row({"key": f"new{n}", "text": "", "description": "", "icon": ""})
+        self._insert_row({"key": f"new{n}", "text": "", "description": "", "icon": "", "lazy": False})
 
     def duplicate_entry(self):
         if e := self.current():
@@ -493,17 +514,27 @@ class SettingsDialog(QDialog):
             self.text_edit.setTextCursor(cursor)
         self.insert_placeholder(snippet)
 
-    def update_preview(self):
+    def update_preview(self, force: bool = False):
         e = self.current()
+        lazy = bool(e and e["lazy"])
+        self.run_now_btn.setVisible(lazy)
         if e is None:
             self.preview.setPlainText("")
             return
+        if lazy and not force:
+            self.preview.setStyleSheet("")
+            self.preview.setPlainText("Computed when Enter is pressed. Click Run Now to test it.")
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            result = k.expand(e["text"], self.arg_edit.text().strip(), self.timeout_spin.value())
+            timeout = k.LAZY_TIMEOUT if lazy else self.timeout_spin.value()
+            result = k.expand(e["text"], self.arg_edit.text().strip(), timeout)
             self.preview.setStyleSheet("")
         except Exception as ex:
             result = f"Error: {ex}"
             self.preview.setStyleSheet("color: palette(link-visited);")
+        finally:
+            QApplication.restoreOverrideCursor()
         self.preview.setPlainText(result)
 
 

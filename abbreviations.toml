@@ -18,8 +18,9 @@
 #   {env:USER}           environment variable
 #   {clipboard}          current clipboard contents
 #   {input}              text typed after the abbreviation, or else the clipboard
-#   {cmd:shell command}  stdout of a command (see cmd_timeout; $ABBR_ARG holds {arg})
-#   {{ and }}            literal braces
+#   {cmd:shell command}  stdout of a command (see cmd_timeout); $ABBR_ARG holds {arg},
+#                        $ABBR_INPUT holds {input}. Placeholders can't contain { or }.
+#   {{ and }}            literal braces: \emph{{{input}}} → \emph{text}
 #
 # Filters transform any placeholder and can be chained: {clipboard|unhyphen|join}
 #   upper lower title sentence swapcase   case (title = English title case)
@@ -30,11 +31,17 @@
 #   deaccent slug snake camel              café → cafe, url-slug, snake_case, camelCase
 #   sort uniq                              sort lines / drop duplicate lines
 #   urlencode urldecode base64 unbase64
+#   roman unroman                          2026 ↔ MMXXVI
+#   nomacrons vtou jtoi                    Latin: ā → a, v → u, j → i
+#   latex                                  escape & % $ # _ { } ~ ^ \
+#   stats words chars                      "12 words · 70 characters · 2 lines"
 #   sh(command)                            pipe through a shell command: sh(sort -u)
 # Quote filter arguments that contain spaces or commas: replace(" ", "_").
 # In {cmd:...}, write shell pipes with spaces ("a | sort") so they aren't read as filters.
 #
-# Values are either a plain string or a table with text / description / icon.
+# Values are either a plain string or a table with text / description / icon / lazy.
+# lazy = true computes the expansion only when Enter is pressed (for slow commands such
+# as network lookups); a notification shows what was copied.
 
 [settings]
 prefix = "abbr"        # trigger keyword: type "abbr isod"; "" = match abbreviations directly
@@ -63,6 +70,13 @@ kernel = "{cmd:uname -r}"
 
 # --- with arguments
 gh = "https://github.com/{arg:nivaca}"
+
+# --- symbols
+em = "—"
+en = "–"
+sect = "§"
+para = "¶"
+check = "✓"
 
 # --- clipboard (or typed text) transformations: copy, then e.g. "abbr title"
 [abbr.title]
@@ -99,6 +113,70 @@ icon = "format-join-node"
 text = "{input|slug}"
 description = "Clipboard or typed text → url-slug"
 icon = "edit-link"
+
+# --- latex & markdown
+[abbr.emph]
+text = '\emph{{{input}}}'
+description = 'Wrap in \emph{}'
+icon = "format-text-italic"
+
+[abbr.cite]
+text = '\cite{{{input}}}'
+description = 'Wrap in \cite{}'
+icon = "format-text-code"
+
+[abbr.latex]
+text = "{input|latex}"
+description = "Escape LaTeX special characters"
+icon = "format-text-code"
+
+[abbr.mdlink]
+text = "[{arg}]({clipboard})"
+description = "Markdown link: mdlink Title (URL from clipboard)"
+icon = "edit-link"
+
+[abbr.guil]
+text = "«{input}»"
+description = "Spanish quotes «…»"
+icon = "format-text-blockquote"
+
+# --- latin
+[abbr.annus]
+text = "{date:%Y|roman}"
+description = "Current year in Roman numerals"
+icon = "view-calendar"
+
+[abbr.roman]
+text = "{input|roman}"
+description = "Number → Roman numeral"
+icon = "format-number"
+
+[abbr.unroman]
+text = "{input|unroman}"
+description = "Roman numeral → number"
+icon = "format-number"
+
+[abbr.macrons]
+text = "{input|nomacrons}"
+description = "Remove macrons and breves"
+icon = "format-text-lowercase"
+
+# --- utilities
+[abbr.wc]
+text = "{input|stats}"
+description = "Word, character and line count"
+icon = "format-list-ordered"
+
+[abbr.on]
+text = '{cmd:date -d "$ABBR_ARG" +%F 2>&1}'
+description = "Date from plain English: on next friday"
+icon = "view-calendar"
+
+[abbr.bib]
+text = '{cmd:curl -sLf -H "Accept: application/x-bibtex; charset=utf-8" "https://doi.org/$(echo "$ABBR_INPUT" | sed "s|.*doi.org/||")"|strip}'
+description = "BibTeX for a DOI (typed or copied)"
+icon = "bookmarks"
+lazy = true             # computed only when Enter is pressed
 
 # --- static text (table form with a description)
 [abbr.sig]

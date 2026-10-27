@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import tomllib
 import unicodedata
 import urllib.parse
@@ -44,6 +45,7 @@ HIGHEST = 100
 LOW = 30
 
 CMD_TIMEOUT = 2.0  # default seconds for {cmd:...} placeholders
+LAZY_TIMEOUT = 20.0  # seconds for abbreviations computed only when Enter is pressed
 SUBTEXT_MAX = 80
 
 # {name}, {name+1d-2h}, {name:spec}, {name+1w:spec}, each optionally followed by |filters
@@ -173,6 +175,58 @@ def regex_sub(text: str, pattern: str, repl: str = "") -> str:
         raise ValueError(f"bad regex {pattern!r}: {e}") from None
 
 
+ROMAN = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+         (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+
+
+def to_roman(text: str) -> str:
+    try:
+        n = int(text.strip())
+    except ValueError:
+        raise ValueError(f"|roman needs a whole number, got {text.strip()!r}") from None
+    if not 0 < n < 4000:
+        raise ValueError(f"|roman works for 1–3999, got {n}")
+    out = ""
+    for value, numeral in ROMAN:
+        count, n = divmod(n, value)
+        out += numeral * count
+    return out
+
+
+def from_roman(text: str) -> str:
+    numeral = text.strip().upper()
+    values = {s: v for v, s in ROMAN if len(s) == 1}
+    if not numeral or any(c not in values for c in numeral):
+        raise ValueError(f"not a Roman numeral: {text.strip()!r}")
+    total = 0
+    for i, c in enumerate(numeral):
+        v = values[c]
+        total += -v if i + 1 < len(numeral) and values[numeral[i + 1]] > v else v
+    if not 0 < total < 4000 or to_roman(str(total)) != numeral:
+        raise ValueError(f"not a valid Roman numeral: {text.strip()!r}")
+    return str(total)
+
+
+def no_macrons(text: str) -> str:
+    """Remove macrons and breves (Latin vowel quantity), keeping other accents."""
+    decomposed = unicodedata.normalize("NFD", text)
+    return unicodedata.normalize("NFC", re.sub("[\u0304\u0306]", "", decomposed))
+
+
+LATEX_ESCAPES = {
+    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
+    "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
+def text_stats(text: str) -> str:
+    def count(n: int, noun: str) -> str:
+        return f"{n:,} {noun}" + ("" if n == 1 else "s")
+
+    return " · ".join([count(len(text.split()), "word"), count(len(text), "character"),
+                       count(len(text.splitlines()), "line")])
+
+
 def shell_filter(text: str, command: str, *, timeout: float) -> str:
     res = subprocess.run(command, shell=True, input=text, capture_output=True, text=True,
                          timeout=timeout)
@@ -203,6 +257,16 @@ FILTERS = {
     "urldecode": (urllib.parse.unquote, 0, 0, "percent-decode"),
     "base64": (lambda s: base64.b64encode(s.encode()).decode(), 0, 0, "base64-encode"),
     "unbase64": (lambda s: base64.b64decode(s).decode(errors="replace"), 0, 0, "base64-decode"),
+    "roman": (to_roman, 0, 0, "number → Roman numeral: 2026 → MMXXVI"),
+    "unroman": (from_roman, 0, 0, "Roman numeral → number: xiv → 14"),
+    "nomacrons": (no_macrons, 0, 0, "remove macrons and breves: ā ă → a"),
+    "vtou": (lambda s: s.replace("v", "u").replace("V", "U"), 0, 0, "Latin orthography: v → u"),
+    "jtoi": (lambda s: s.replace("j", "i").replace("J", "I"), 0, 0, "Latin orthography: j → i"),
+    "latex": (lambda s: "".join(LATEX_ESCAPES.get(c, c) for c in s), 0, 0,
+              "escape LaTeX special characters: & % $ # _ { } ~ ^ \\"),
+    "stats": (text_stats, 0, 0, "word, character and line counts"),
+    "words": (lambda s: str(len(s.split())), 0, 0, "word count"),
+    "chars": (lambda s: str(len(s)), 0, 0, "character count"),
     "sh": (shell_filter, 1, 1, "pipe through a shell command: sh(sort -u)"),
 }
 
@@ -277,6 +341,24 @@ def apply_filters(value: str, filters, timeout: float) -> str:
     return value
 
 
+# ---------------------------------------------------------------- notifications
+
+
+def notify(summary: str, body: str = "", icon: str = "edit-paste") -> None:
+    try:
+        import dbus
+
+        dbus.Interface(
+            dbus.SessionBus().get_object(
+                "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
+            ),
+            "org.freedesktop.Notifications",
+        ).Notify("Abbreviations", dbus.UInt32(0), icon, summary, body, dbus.Array([], "s"),
+                 dbus.Dictionary({"transient": dbus.Boolean(True)}, "sv"), 5000)
+    except Exception as e:
+        print(f"notification failed: {e}", file=sys.stderr)
+
+
 # ---------------------------------------------------------------- templates
 
 
@@ -307,9 +389,16 @@ DATE_DEFAULTS = {
 }
 
 
-def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT) -> str:
-    """Expand all placeholders in template. Raises ValueError on bad input."""
+def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
+           clipboard: str | None = None) -> str:
+    """Expand all placeholders in template. Raises ValueError on bad input.
+
+    Pass clipboard to use a pre-read value instead of querying the clipboard.
+    """
     now = datetime.now().astimezone()
+
+    def clip() -> str:
+        return get_clipboard() if clipboard is None else clipboard
 
     def repl(m: re.Match) -> str:
         rest = m["rest"] or ""
@@ -332,27 +421,35 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT) -> str:
         if name == "env":
             return os.environ.get(spec or "", "")
         if name == "clipboard":
-            return get_clipboard()
+            return clip()
         if name == "input":  # text typed after the abbreviation, else the clipboard
-            return arg or get_clipboard()
+            return arg or clip()
         if name == "cmd":
             if not spec:
                 raise ValueError("{cmd:...} needs a command")
             env = dict(os.environ, ABBR_ARG=arg)
+            if "ABBR_INPUT" in spec:
+                env["ABBR_INPUT"] = (arg or clip()).strip()
             res = subprocess.run(
                 spec, shell=True, capture_output=True, text=True, timeout=timeout, env=env
             )
             return res.stdout.rstrip("\n")
         raise ValueError(f"unknown placeholder {m[0]}")
 
-    # {{ and }} are literal braces
-    parts = template.replace("{{", "\0L").replace("}}", "\0R").split("\0")
-    out = []
-    for i, part in enumerate(parts):
-        if i > 0:
-            out.append("{" if part[0] == "L" else "}")
-            part = part[1:]
-        out.append(PLACEHOLDER_RE.sub(repl, part))
+    # scan left to right like str.format: {{ and }} are literal braces, so
+    # \emph{{{clipboard}}} is "\emph{" + placeholder + "}"
+    out, i = [], 0
+    while i < len(template):
+        c = template[i]
+        if c in "{}" and template.startswith(c * 2, i):
+            out.append(c)
+            i += 2
+        elif c == "{" and (m := PLACEHOLDER_RE.match(template, i)):
+            out.append(repl(m))
+            i = m.end()
+        else:
+            out.append(c)
+            i += 1
     return "".join(out)
 
 
@@ -494,6 +591,16 @@ def run_service() -> None:
                 ))
             for abbr, arg, category in find_matches(cfg, query):
                 match_id = f"{abbr['key']}\x1f{arg}"
+                relevance = 1.0 if category == HIGHEST else 0.5
+                if abbr.get("lazy"):  # computed in Run, e.g. network lookups
+                    label = abbr.get("description") or one_line(abbr["text"], 200)
+                    results.append((
+                        match_id, f"{label}: {arg}" if arg else label,
+                        abbr.get("icon", "system-run"), category, relevance,
+                        {"subtext": f"{abbr['key']} · press Enter to run and copy",
+                         "category": "Abbreviations"},
+                    ))
+                    continue
                 try:
                     text = expand(abbr["text"], arg, cfg.cmd_timeout)
                 except Exception as e:
@@ -505,7 +612,6 @@ def run_service() -> None:
                 self.shown[match_id] = text
                 subtext = f"{abbr['key']} · {abbr['description']}" if abbr.get("description") \
                     else f"{abbr['key']} → copy to clipboard"
-                relevance = 1.0 if category == HIGHEST else 0.5
                 results.append((
                     match_id, one_line(text, 200), abbr.get("icon", "edit-paste"), category,
                     relevance, {"subtext": subtext, "category": "Abbreviations"},
@@ -521,14 +627,44 @@ def run_service() -> None:
             if match_id == SETTINGS_ID:
                 subprocess.Popen([sys.executable, str(SETTINGS_APP)], start_new_session=True)
                 return
+            key, _, arg = match_id.partition("\x1f")
+            abbr = cfg.abbrs.get(key.lower())
             text = self.shown.get(match_id)
-            if text is None:  # stale id: recompute
-                key, _, arg = match_id.partition("\x1f")
-                abbr = cfg.abbrs.get(key.lower())
-                if abbr is None:
-                    return
-                text = expand(abbr["text"], arg, cfg.cmd_timeout)
-            set_clipboard(text)
+            if text is not None:
+                set_clipboard(text)
+            elif abbr is None:
+                return
+            elif abbr.get("lazy"):
+                self.run_lazy(abbr, arg)
+            else:  # stale id: recompute
+                try:
+                    set_clipboard(expand(abbr["text"], arg, cfg.cmd_timeout))
+                except Exception as e:
+                    notify(f"“{abbr['key']}” failed", str(e), "dialog-error")
+
+        def run_lazy(self, abbr: dict, arg: str):
+            """Expand in a thread so slow commands don't block KRunner's queries."""
+            clipboard = get_clipboard()  # D-Bus calls stay on the main thread
+
+            def work():
+                try:
+                    text, error = expand(abbr["text"], arg, LAZY_TIMEOUT, clipboard), None
+                except Exception as e:
+                    text, error = None, e
+                GLib.idle_add(finish, text, error)
+
+            def finish(text, error):
+                if error is not None:
+                    notify(f"“{abbr['key']}” failed", str(error), "dialog-error")
+                elif not text.strip():
+                    notify(f"“{abbr['key']}” produced no output", "Nothing was copied.",
+                           "dialog-warning")
+                else:
+                    set_clipboard(text)
+                    notify("Copied to clipboard", one_line(text, 300), abbr.get("icon", "edit-paste"))
+                return False
+
+            threading.Thread(target=work, daemon=True).start()
 
         @dbus.service.method(IFACE)
         def Teardown(self):
@@ -564,7 +700,8 @@ def main() -> None:
             print("[settings] opens the settings dialog")
         for abbr, arg, category in find_matches(cfg, query):
             tag = "exact " if category == HIGHEST else "prefix"
-            print(f"[{tag}] {abbr['key']}: {expand(abbr['text'], arg, cfg.cmd_timeout)}")
+            timeout = LAZY_TIMEOUT if abbr.get("lazy") else cfg.cmd_timeout
+            print(f"[{tag}] {abbr['key']}: {expand(abbr['text'], arg, timeout)}")
         return
 
     run_service()
