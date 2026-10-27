@@ -204,9 +204,15 @@ def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
     """Return (abbr, arg, category) for every abbreviation matching query."""
     query = query.strip()
     if cfg.prefix:
-        if not query.startswith(cfg.prefix):
+        head, rest = query[:len(cfg.prefix)], query[len(cfg.prefix):]
+        if head.lower() != cfg.prefix.lower():
             return []
-        query = query[len(cfg.prefix):].lstrip()
+        # a word keyword ("expan") needs a space after it; a symbol (";") does not
+        if cfg.prefix[-1].isalnum() and rest and not rest[0].isspace():
+            return []
+        query = rest.lstrip()
+        if not query:  # just the keyword: list everything
+            return [(abbr, "", LOW) for _, abbr in sorted(cfg.abbrs.items())]
     if not query:
         return []
     key, _, arg = query.partition(" ")

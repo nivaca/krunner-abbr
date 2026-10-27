@@ -2,8 +2,9 @@
 # Installed to ~/.config/krunner-abbr/abbreviations.toml; edits are picked up
 # automatically on the next keystroke in KRunner (no restart needed).
 #
-# Type an abbreviation in KRunner, press Enter, and the expansion is copied to
-# the clipboard. Keys are case-insensitive.
+# In KRunner type the trigger keyword and an abbreviation ("expan isod"), press
+# Enter, and the expansion is copied to the clipboard. The keyword alone lists all
+# abbreviations. Keys are case-insensitive.
 #
 # Placeholders
 #   {date}               today, ISO           2026-10-27
@@ -16,14 +17,15 @@
 #   {uuid}               random UUID4
 #   {env:USER}           environment variable
 #   {clipboard}          current clipboard contents
-#   {cmd:shell command}  stdout of a command (2 s timeout; $ABBR_ARG holds {arg})
+#   {cmd:shell command}  stdout of a command (see cmd_timeout; $ABBR_ARG holds {arg})
 #   {{ and }}            literal braces
 #
 # Values are either a plain string or a table with text / description / icon.
 
 [settings]
-prefix = ""            # e.g. ";" to only react to ";isod"
+prefix = "expan"       # trigger keyword: type "expan isod"; "" = match abbreviations directly
 min_prefix_chars = 2   # also suggest abbreviations starting with what you typed; 0 = exact only
+cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
 
 [abbr]
 # --- dates & times

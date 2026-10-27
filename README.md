@@ -1,7 +1,8 @@
 # krunner-abbr
 
-KRunner (Plasma 6) plugin that expands abbreviations. Type one in KRunner, press
-Enter, and the expansion is copied to the clipboard.
+KRunner (Plasma 6) plugin that expands abbreviations. Type the trigger keyword and an
+abbreviation in KRunner (`expan isod`), press Enter, and the expansion is copied to the
+clipboard. The keyword alone lists all abbreviations.
 
 ## Install
 
@@ -13,13 +14,22 @@ the project directory.
 
 To remove it, run `./uninstall.sh`. Your abbreviations file is kept unless you add `--purge`.
 
+## Settings
+
+Launch **Abbreviations Settings** from the application menu or KRunner, or run
+`./krunner_abbr_settings.py` (needs PySide6). It sets the trigger keyword, partial-match
+suggestions and the command timeout, and lets you add and edit abbreviations with a
+live preview. Saving rewrites the config file and keeps the previous version as
+`abbreviations.toml.bak`; comments you added by hand are not kept.
+
 ## Abbreviations
 
-Edit `~/.config/krunner-abbr/abbreviations.toml`. Changes apply on the next keystroke.
+You can also edit `~/.config/krunner-abbr/abbreviations.toml` directly. Changes apply on
+the next keystroke.
 The example file documents all placeholders: `{date}`, `{now+1d:%A}`, `{arg}`,
 `{uuid}`, `{env:VAR}`, `{clipboard}`, `{cmd:...}`, and others.
 
 ## Testing from the shell
 
     ./krunner_abbr.py --list          # every abbreviation with its current expansion
-    ./krunner_abbr.py --expand gh foo # what KRunner would show for "gh foo"
+    ./krunner_abbr.py --expand expan gh foo  # what KRunner shows for "expan gh foo"

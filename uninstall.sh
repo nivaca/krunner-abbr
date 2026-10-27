@@ -8,7 +8,8 @@ DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/krunner-abbr"
 
 rm -fv "$DATA/krunner/dbusplugins/krunner-abbr.desktop" \
-       "$DATA/dbus-1/services/$SERVICE.service"
+       "$DATA/dbus-1/services/$SERVICE.service" \
+       "$DATA/applications/krunner-abbr-settings.desktop"
 
 if [[ "${1:-}" == "--purge" ]]; then
     rm -rfv "$CONF"
