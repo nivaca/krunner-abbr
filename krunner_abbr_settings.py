@@ -6,6 +6,7 @@ next keystroke in KRunner.
 """
 
 import json
+import locale
 import os
 import re
 import shutil
@@ -101,6 +102,7 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
         f"prefix = {toml_str(settings['prefix'])}",
         f"min_prefix_chars = {settings['min_prefix_chars']}",
         f"cmd_timeout = {settings['cmd_timeout']}",
+        f"notify = {'true' if settings['notify'] else 'false'}",
         "",
         "[abbr]",
     ]
@@ -231,6 +233,14 @@ class SettingsDialog(QDialog):
             "Maximum run time for <code>{cmd:…}</code> placeholders. Commands run on "
             "every keystroke that matches, so keep them fast."
         ))
+
+        self.notify_check = QCheckBox("Show a notification after copying")
+        self.notify_check.toggled.connect(self._general_changed)
+        form.addRow("Notifications:", self.notify_check)
+        form.addRow("", self._hint(
+            "Abbreviations computed on Enter, and errors, always notify, since their "
+            "result isn't shown in KRunner."
+        ))
         return w
 
     def _build_abbr_tab(self) -> QWidget:
@@ -359,6 +369,7 @@ class SettingsDialog(QDialog):
         self.prefix_edit.setText(settings.get("prefix", k.DEFAULT_PREFIX))
         self.min_prefix_spin.setValue(int(settings.get("min_prefix_chars", 2)))
         self.timeout_spin.setValue(float(settings.get("cmd_timeout", k.CMD_TIMEOUT)))
+        self.notify_check.setChecked(bool(settings.get("notify", False)))
         self.list.clear()
         for e in self.entries:
             self.list.addItem(self._make_item(e))
@@ -399,6 +410,7 @@ class SettingsDialog(QDialog):
             "prefix": self.prefix_edit.text().strip(),
             "min_prefix_chars": self.min_prefix_spin.value(),
             "cmd_timeout": round(self.timeout_spin.value(), 1),
+            "notify": self.notify_check.isChecked(),
         }
         text = dump_config(settings, self.entries)
         tomllib.loads(text)  # never write a file the runner can't read
@@ -579,6 +591,7 @@ class SettingsDialog(QDialog):
 
 
 def main():
+    locale.setlocale(locale.LC_ALL, "")  # locale-aware sorting in previews
     app = QApplication(sys.argv)
     app.setApplicationName("krunner-abbr-settings")
     dlg = SettingsDialog()

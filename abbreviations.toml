@@ -29,7 +29,9 @@
 #   squeeze strip                          collapse runs of spaces / trim
 #   replace(old, new)  sub(regex, repl)    literal / regex replacement
 #   deaccent slug snake camel              café → cafe, url-slug, snake_case, camelCase
-#   sort uniq                              sort lines / drop duplicate lines
+#   sort  sort(reverse)                    sort lines: natural order, ignoring case and accents
+#   sortitems(", ")                        sort a one-line list: pear, apple → apple, pear
+#   uniq reverse shuffle number            drop duplicates / reverse / shuffle / 1. 2. 3.
 #   urlencode urldecode base64 unbase64
 #   roman unroman                          2026 ↔ MMXXVI
 #   nomacrons vtou jtoi                    Latin: ā → a, v → u, j → i
@@ -54,6 +56,7 @@
 prefix = "abbr"        # trigger keyword: type "abbr isod"; "" = match abbreviations directly
 min_prefix_chars = 2   # also suggest abbreviations starting with what you typed; 0 = exact only
 cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
+notify = false         # notification after every copy (run-on-Enter results and errors always notify)
 
 [abbr]
 # --- dates & times
@@ -278,6 +281,32 @@ icon = "format-text-symbol"
 text = " "
 description = "Narrow non-breaking space (invisible)"
 icon = "format-text-symbol"
+
+# --- lists (clipboard or typed text)
+[abbr.sort]
+text = "{input|sort}"
+description = "Sort clipboard lines A→Z"
+icon = "view-sort-ascending"
+
+[abbr.sortr]
+text = "{input|sort(reverse)}"
+description = "Sort clipboard lines Z→A"
+icon = "view-sort-descending"
+
+[abbr.sortu]
+text = "{input|sort|uniq}"
+description = "Sort clipboard lines, dropping duplicates"
+icon = "view-sort-ascending"
+
+[abbr.sortc]
+text = "{input|sortitems(\", \")}"
+description = "Sort a comma-separated list"
+icon = "view-sort-ascending"
+
+[abbr.numl]
+text = "{input|number}"
+description = "Number clipboard lines: 1. 2. 3."
+icon = "format-list-ordered"
 
 # --- static text (table form with a description)
 [abbr.sig]

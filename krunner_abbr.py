@@ -14,6 +14,7 @@ import calendar
 import csv
 import locale
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -340,6 +341,29 @@ def text_stats(text: str) -> str:
                        count(len(text.splitlines()), "line")])
 
 
+def _natural_key(item: str) -> list:
+    """Case- and accent-insensitive, locale-aware, numbers by value: item2 < item10."""
+    return [(0, int(p), "") if p.isdigit() else (1, 0, locale.strxfrm(p.casefold()))
+            for p in re.split(r"(\d+)", item.strip()) if p]
+
+
+def _sorted(items: list[str], options: tuple[str, ...]) -> list[str]:
+    unknown = set(options) - {"reverse"}
+    if unknown:
+        raise ValueError(f"unknown sort option {', '.join(sorted(unknown))}; use reverse")
+    return sorted(items, key=_natural_key, reverse="reverse" in options)
+
+
+def sort_lines(text: str, *options: str) -> str:
+    return "\n".join(_sorted([l for l in text.splitlines() if l.strip()], options))
+
+
+def sort_items(text: str, sep: str = ", ", *options: str) -> str:
+    """Sort a one-line list such as "pear, apple, fig" (split on sep, rejoined with sep)."""
+    items = [i.strip() for i in text.split(sep.strip() or sep) if i.strip()]
+    return sep.join(_sorted(items, options))
+
+
 def shell_filter(text: str, command: str, *, timeout: float) -> str:
     res = subprocess.run(command, shell=True, input=text, capture_output=True, text=True,
                          timeout=timeout)
@@ -364,8 +388,14 @@ FILTERS = {
     "snake": (lambda s: "_".join(_words(s)).lower(), 0, 0, "snake_case"),
     "camel": (lambda s: "".join(w.lower() if i == 0 else w.capitalize()
                                 for i, w in enumerate(_words(s))), 0, 0, "camelCase"),
-    "sort": (lambda s: "\n".join(sorted(s.splitlines(), key=str.casefold)), 0, 0, "sort lines"),
+    "sort": (sort_lines, 0, 1, "sort lines: natural order (2 < 10), ignoring case and accents; sort(reverse)"),
+    "sortitems": (sort_items, 0, 2, 'sort a one-line list: sortitems(", ") or sortitems(";", reverse)'),
     "uniq": (lambda s: "\n".join(dict.fromkeys(s.splitlines())), 0, 0, "drop duplicate lines"),
+    "reverse": (lambda s: "\n".join(reversed(s.splitlines())), 0, 0, "reverse the order of lines"),
+    "shuffle": (lambda s: "\n".join(random.sample(s.splitlines(), len(s.splitlines()))), 0, 0,
+                "shuffle lines"),
+    "number": (lambda s: "\n".join(f"{i}. {l}" for i, l in enumerate(
+        (l for l in s.splitlines() if l.strip()), 1)), 0, 0, "number lines: 1. 2. 3."),
     "urlencode": (lambda s: urllib.parse.quote(s, safe=""), 0, 0, "percent-encode"),
     "urldecode": (urllib.parse.unquote, 0, 0, "percent-decode"),
     "base64": (lambda s: base64.b64encode(s.encode()).decode(), 0, 0, "base64-encode"),
@@ -460,19 +490,29 @@ def apply_filters(value: str, filters, timeout: float) -> str:
 # ---------------------------------------------------------------- notifications
 
 
+_last_notification = 0  # replaced by the next notification instead of stacking up
+
+
 def notify(summary: str, body: str = "", icon: str = "edit-paste") -> None:
+    global _last_notification
     try:
         import dbus
 
-        dbus.Interface(
+        _last_notification = int(dbus.Interface(
             dbus.SessionBus().get_object(
                 "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
             ),
             "org.freedesktop.Notifications",
-        ).Notify("Abbreviations", dbus.UInt32(0), icon, summary, body, dbus.Array([], "s"),
-                 dbus.Dictionary({"transient": dbus.Boolean(True)}, "sv"), 5000)
+        ).Notify("Abbreviations", dbus.UInt32(_last_notification), icon, summary, body,
+                 dbus.Array([], "s"), dbus.Dictionary({"transient": dbus.Boolean(True)}, "sv"),
+                 5000))
     except Exception as e:
         print(f"notification failed: {e}", file=sys.stderr)
+
+
+def notify_copied(abbr: dict, text: str) -> None:
+    body = one_line(text, 300) if text.strip() else abbr.get("description", "")
+    notify(f"Copied “{abbr['key']}”", body, abbr.get("icon", "edit-paste"))
 
 
 # ---------------------------------------------------------------- templates
@@ -583,6 +623,7 @@ class Config:
         self.prefix = DEFAULT_PREFIX
         self.min_prefix_chars = 2
         self.cmd_timeout = CMD_TIMEOUT
+        self.notify = False
         self.abbrs: dict[str, dict] = {}
         self.error = ""
 
@@ -605,6 +646,7 @@ class Config:
         self.prefix = settings.get("prefix", DEFAULT_PREFIX)
         self.min_prefix_chars = int(settings.get("min_prefix_chars", 2))
         self.cmd_timeout = float(settings.get("cmd_timeout", CMD_TIMEOUT))
+        self.notify = bool(settings.get("notify", False))
         abbrs = {}
         for key, val in data.get("abbr", {}).items():
             if isinstance(val, str):
@@ -763,17 +805,20 @@ def run_service() -> None:
             key, _, arg = match_id.partition("\x1f")
             abbr = cfg.abbrs.get(key.lower())
             text = self.shown.get(match_id)
-            if text is not None:
-                set_clipboard(text)
-            elif abbr is None:
+            if abbr is None and text is None:
                 return
-            elif abbr.get("lazy"):
+            if abbr is not None and abbr.get("lazy"):
                 self.run_lazy(abbr, arg)
-            else:  # stale id: recompute
+                return
+            if text is None:  # stale id: recompute
                 try:
-                    set_clipboard(expand(abbr["text"], arg, cfg.cmd_timeout))
+                    text = expand(abbr["text"], arg, cfg.cmd_timeout)
                 except Exception as e:
                     notify(f"“{abbr['key']}” failed", str(e), "dialog-error")
+                    return
+            set_clipboard(text)
+            if cfg.notify:
+                notify_copied(abbr or {"key": key}, text)
 
         def run_lazy(self, abbr: dict, arg: str):
             """Expand in a thread so slow commands don't block KRunner's queries."""
@@ -794,7 +839,7 @@ def run_service() -> None:
                            "dialog-warning")
                 else:
                     set_clipboard(text)
-                    notify("Copied to clipboard", one_line(text, 300), abbr.get("icon", "edit-paste"))
+                    notify_copied(abbr, text)  # always: the result wasn't shown in KRunner
                 return False
 
             threading.Thread(target=work, daemon=True).start()
