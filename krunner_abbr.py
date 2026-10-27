@@ -276,9 +276,9 @@ def run_service() -> None:
     class Runner(dbus.service.Object):
         def __init__(self):
             DBusGMainLoop(set_as_default=True)
-            bus = dbus.SessionBus()
-            self._name = dbus.service.BusName(SERVICE, bus)
-            super().__init__(bus, OBJPATH)
+            # the Object keeps the BusName alive; storing it ourselves as self._name would be
+            # clobbered by Object.__init__, releasing the name immediately
+            super().__init__(dbus.service.BusName(SERVICE, dbus.SessionBus()), OBJPATH)
             # expansions shown in the last query, so Run copies exactly what was displayed
             self.shown: dict[str, str] = {}
 
