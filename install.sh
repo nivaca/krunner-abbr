@@ -41,4 +41,20 @@ fi
 # restart a running instance so code changes take effect; D-Bus re-activates it on demand
 pkill -f "$HERE/krunner_abbr.py" || true
 kquitapp6 krunner 2>/dev/null || true
-echo "Installed. Open KRunner and type e.g. 'abbr isod', or 'abbr settings' to configure."
+# build the usage hint from the configured keyword, using the runner's own rules
+IFS=$'\t' read -r EXAMPLE SETTINGS < <(python3 - "$HERE" <<'EOF' 2>/dev/null || printf "'abbr isod'\t'abbr settings'\n"
+import sys
+sys.path.insert(0, sys.argv[1])
+import krunner_abbr as k
+
+cfg = k.Config(k.CONFIG_FILE)
+cfg.reload_if_changed()
+
+def with_trigger(trigger, word):
+    return trigger + (" " if trigger[-1:].isalnum() else "") + word
+
+key = next(iter(cfg.abbrs.values()), {"key": "isod"})["key"]
+print(f"'{with_trigger(cfg.prefix, key)}'\t'{with_trigger(cfg.prefix or k.DEFAULT_PREFIX, k.SETTINGS_WORD)}'")
+EOF
+)
+echo "Installed. Open KRunner and type e.g. $EXAMPLE, or $SETTINGS to configure."
