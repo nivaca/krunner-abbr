@@ -27,18 +27,6 @@ X-Plasma-DBusRunner-Path=/runner
 X-Plasma-Runner-Min-Letter-Count=2
 EOF
 
-mkdir -p "$DATA/applications"
-cat > "$DATA/applications/krunner-abbr-settings.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Abbreviations Settings
-Comment=Configure KRunner abbreviation expansion
-Icon=edit-paste
-Exec=/usr/bin/python3 $HERE/krunner_abbr_settings.py
-Categories=Settings;Utility;Qt;KDE;
-Keywords=krunner;abbreviation;expand;snippet;
-EOF
-
 cat > "$DATA/dbus-1/services/$SERVICE.service" <<EOF
 [D-BUS Service]
 Name=$SERVICE
@@ -53,4 +41,4 @@ fi
 # restart a running instance so code changes take effect; D-Bus re-activates it on demand
 pkill -f "$HERE/krunner_abbr.py" || true
 kquitapp6 krunner 2>/dev/null || true
-echo "Installed. Open KRunner and type e.g. 'expan isod', or launch 'Abbreviations Settings'."
+echo "Installed. Open KRunner and type e.g. 'abbr isod', or 'abbr settings' to configure."

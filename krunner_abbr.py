@@ -29,6 +29,11 @@ HERE = Path(__file__).resolve().parent
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "krunner-abbr"
 CONFIG_FILE = CONFIG_DIR / "abbreviations.toml"
 EXAMPLE_CONFIG = HERE / "abbreviations.toml"
+SETTINGS_APP = HERE / "krunner_abbr_settings.py"
+
+DEFAULT_PREFIX = "abbr"
+SETTINGS_WORD = "settings"  # "<keyword> settings" opens the settings dialog
+SETTINGS_ID = "\x1esettings"
 
 # KRunner match categories (Plasma 6 QueryMatch::CategoryRelevance)
 HIGHEST = 100
@@ -163,7 +168,7 @@ class Config:
     def __init__(self, path: Path):
         self.path = path
         self.mtime = None
-        self.prefix = ""
+        self.prefix = DEFAULT_PREFIX
         self.min_prefix_chars = 2
         self.cmd_timeout = CMD_TIMEOUT
         self.abbrs: dict[str, dict] = {}
@@ -185,7 +190,7 @@ class Config:
             print(self.error, file=sys.stderr)
             return  # keep the last good config
         settings = data.get("settings", {})
-        self.prefix = settings.get("prefix", "")
+        self.prefix = settings.get("prefix", DEFAULT_PREFIX)
         self.min_prefix_chars = int(settings.get("min_prefix_chars", 2))
         self.cmd_timeout = float(settings.get("cmd_timeout", CMD_TIMEOUT))
         abbrs = {}
@@ -200,17 +205,40 @@ class Config:
 # ---------------------------------------------------------------- matching
 
 
+def strip_trigger(query: str, trigger: str) -> str | None:
+    """Return query without the trigger keyword, or None if it doesn't start with it."""
+    head, rest = query[:len(trigger)], query[len(trigger):]
+    if head.lower() != trigger.lower():
+        return None
+    # a word keyword ("abbr") needs a space after it; a symbol (";") does not
+    if trigger[-1].isalnum() and rest and not rest[0].isspace():
+        return None
+    return rest.lstrip()
+
+
+def settings_match(cfg: Config, query: str) -> int | None:
+    """Category of the "open settings" result for query, or None if it shouldn't show."""
+    # without a configured keyword, "abbr settings" still opens the dialog
+    rest = strip_trigger(query.strip(), cfg.prefix or DEFAULT_PREFIX)
+    if rest is None:
+        return None
+    rest = rest.lower()
+    if rest == SETTINGS_WORD:
+        return HIGHEST
+    if not rest and cfg.prefix:
+        return LOW  # listed along with all abbreviations
+    if cfg.min_prefix_chars and len(rest) >= cfg.min_prefix_chars and SETTINGS_WORD.startswith(rest):
+        return LOW
+    return None
+
+
 def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
     """Return (abbr, arg, category) for every abbreviation matching query."""
     query = query.strip()
     if cfg.prefix:
-        head, rest = query[:len(cfg.prefix)], query[len(cfg.prefix):]
-        if head.lower() != cfg.prefix.lower():
+        query = strip_trigger(query, cfg.prefix)
+        if query is None:
             return []
-        # a word keyword ("expan") needs a space after it; a symbol (";") does not
-        if cfg.prefix[-1].isalnum() and rest and not rest[0].isspace():
-            return []
-        query = rest.lstrip()
         if not query:  # just the keyword: list everything
             return [(abbr, "", LOW) for _, abbr in sorted(cfg.abbrs.items())]
     if not query:
@@ -259,6 +287,12 @@ def run_service() -> None:
             cfg.reload_if_changed()
             self.shown = {}
             results = []
+            if (category := settings_match(cfg, query)) is not None:
+                results.append((
+                    SETTINGS_ID, "Abbreviations Settings", "configure", category,
+                    1.0 if category == HIGHEST else 0.4,
+                    {"subtext": "Open the settings dialog", "category": "Abbreviations"},
+                ))
             for abbr, arg, category in find_matches(cfg, query):
                 match_id = f"{abbr['key']}\x1f{arg}"
                 try:
@@ -285,6 +319,9 @@ def run_service() -> None:
 
         @dbus.service.method(IFACE, in_signature="ss")
         def Run(self, match_id: str, action_id: str):
+            if match_id == SETTINGS_ID:
+                subprocess.Popen([sys.executable, str(SETTINGS_APP)], start_new_session=True)
+                return
             text = self.shown.get(match_id)
             if text is None:  # stale id: recompute
                 key, _, arg = match_id.partition("\x1f")
@@ -323,7 +360,10 @@ def main() -> None:
                     text = f"ERROR: {e}"
                 print(f"{abbr['key']:<12} {one_line(text, SUBTEXT_MAX)}")
             return
-        for abbr, arg, category in find_matches(cfg, " ".join(args.expand)):
+        query = " ".join(args.expand)
+        if settings_match(cfg, query) is not None:
+            print("[settings] opens the settings dialog")
+        for abbr, arg, category in find_matches(cfg, query):
             tag = "exact " if category == HIGHEST else "prefix"
             print(f"[{tag}] {abbr['key']}: {expand(abbr['text'], arg, cfg.cmd_timeout)}")
         return

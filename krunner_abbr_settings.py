@@ -163,9 +163,10 @@ class SettingsDialog(QDialog):
         form.addRow("Trigger keyword:", self.prefix_edit)
         form.addRow("", self._hint(
             "Only handle KRunner queries that start with this keyword, e.g. "
-            "<code>expan isod</code>. A word keyword must be followed by a space; a "
+            "<code>abbr isod</code>. A word keyword must be followed by a space; a "
             "symbol such as <code>;</code> need not be. The keyword alone lists all "
-            "abbreviations. Leave empty to match abbreviations directly."
+            "abbreviations, and <code>abbr settings</code> opens this dialog. Leave "
+            "empty to match abbreviations directly."
         ))
         self.trigger_example = QLabel()
         form.addRow("", self.trigger_example)
@@ -288,7 +289,7 @@ class SettingsDialog(QDialog):
             QMessageBox.critical(self, "Cannot read configuration", f"{src}\n\n{e}")
             settings, self.entries = {}, []
         self.loading = True
-        self.prefix_edit.setText(settings.get("prefix", ""))
+        self.prefix_edit.setText(settings.get("prefix", k.DEFAULT_PREFIX))
         self.min_prefix_spin.setValue(int(settings.get("min_prefix_chars", 2)))
         self.timeout_spin.setValue(float(settings.get("cmd_timeout", k.CMD_TIMEOUT)))
         self.list.clear()
@@ -491,7 +492,6 @@ class SettingsDialog(QDialog):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("krunner-abbr-settings")
-    app.setDesktopFileName("krunner-abbr-settings")
     dlg = SettingsDialog()
     dlg.show()
     sys.exit(app.exec())
