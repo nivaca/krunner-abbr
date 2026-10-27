@@ -219,6 +219,106 @@ LATEX_ESCAPES = {
 }
 
 
+# open, close
+QUOTE_STYLES = {
+    "straight": ('"', '"'),
+    "straight-single": ("'", "'"),
+    "double": ("“", "”"),
+    "single": ("‘", "’"),
+    "guillemets": ("«", "»"),
+    "single-guillemets": ("‹", "›"),
+    "french": ("« ", " »"),  # guillemets with narrow no-break spaces inside
+    "low": ("„", "“"),
+    "low-single": ("‚", "‘"),
+}
+QUOTE_OPENERS = "“‘«‹„‚"  # straight quotes are ambiguous; see opened_last below
+GUILLEMET_PADDING = "   "
+
+
+def quote_style(name: str) -> tuple[str, str]:
+    """A style name, or the literal pair itself: «», “”, or one straight character."""
+    if name in QUOTE_STYLES:
+        return QUOTE_STYLES[name]
+    if len(name) == 2:
+        return name[0], name[1]
+    if len(name) == 1:
+        return name, name
+    raise ValueError(f"unknown quote style {name!r}; use {', '.join(QUOTE_STYLES)} or a pair like «»")
+
+
+def convert_quotes(text: str, mapping: list[tuple[tuple[str, str], tuple[str, str]]],
+                   apostrophe: str | None = None) -> str:
+    """Convert quote pairs in one pass, so nested styles can be swapped safely.
+
+    mapping holds (source, target) styles. Pairs are matched open/close; a quote
+    character between two letters is an apostrophe and is left alone (or replaced
+    by `apostrophe`). Spaces just inside source guillemets are dropped.
+    """
+    depth = [0] * len(mapping)
+    out: list[str] = []
+    opened_last = False  # the previous character was converted into an opening quote
+    i = 0
+    while i < len(text):
+        c = text[i]
+        prev = text[i - 1] if i else ""
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if c in "'’" and prev.isalnum() and nxt.isalpha():
+            out.append(apostrophe or c)
+            opened_last = False
+            i += 1
+            continue
+        opening_context = (opened_last or not prev or prev.isspace()
+                           or prev in "([{<—–-/" + QUOTE_OPENERS)
+        handled = opened_last = False
+        # closing a pending pair wins over opening a new one („…“ vs “…”)
+        for k, ((so, sc), (_, dc)) in enumerate(mapping):
+            if c == sc[-1] and depth[k] and not (so == sc and opening_context):
+                if sc[-1] in "»›":
+                    while out and out[-1] in GUILLEMET_PADDING:
+                        out.pop()
+                out.append(dc)
+                depth[k] -= 1
+                handled = True
+                break
+        if not handled:
+            for k, ((so, sc), (do, _)) in enumerate(mapping):
+                if c == so[0] and (so != sc or opening_context):
+                    out.append(do)
+                    depth[k] += 1
+                    handled = opened_last = True
+                    if so[0] in "«‹":
+                        while i + 1 < len(text) and text[i + 1] in GUILLEMET_PADDING:
+                            i += 1
+                    break
+        if not handled:
+            out.append(apostrophe if apostrophe and c == "’" else c)
+        i += 1
+    return "".join(out)
+
+
+def quotes_filter(text: str, *styles: str) -> str:
+    if len(styles) % 2:
+        raise ValueError("|quotes takes pairs of styles: quotes(from, to, from, to, …)")
+    mapping = [(quote_style(styles[j]), quote_style(styles[j + 1]))
+               for j in range(0, len(styles), 2)]
+    return convert_quotes(text, mapping)
+
+
+def smart_quotes(text: str) -> str:
+    return convert_quotes(text, [(QUOTE_STYLES["straight"], QUOTE_STYLES["double"]),
+                                 (QUOTE_STYLES["straight-single"], QUOTE_STYLES["single"])],
+                          apostrophe="’")
+
+
+def straight_quotes(text: str) -> str:
+    double, single = QUOTE_STYLES["straight"], QUOTE_STYLES["straight-single"]
+    return convert_quotes(text, [
+        (QUOTE_STYLES["double"], double), (QUOTE_STYLES["guillemets"], double),
+        (QUOTE_STYLES["low"], double), (QUOTE_STYLES["single"], single),
+        (QUOTE_STYLES["single-guillemets"], single), (QUOTE_STYLES["low-single"], single),
+    ], apostrophe="'")
+
+
 def text_stats(text: str) -> str:
     def count(n: int, noun: str) -> str:
         return f"{n:,} {noun}" + ("" if n == 1 else "s")
@@ -264,6 +364,9 @@ FILTERS = {
     "jtoi": (lambda s: s.replace("j", "i").replace("J", "I"), 0, 0, "Latin orthography: j → i"),
     "latex": (lambda s: "".join(LATEX_ESCAPES.get(c, c) for c in s), 0, 0,
               "escape LaTeX special characters: & % $ # _ { } ~ ^ \\"),
+    "quotes": (quotes_filter, 2, 8, "convert quote styles: quotes(from, to)"),
+    "smartquotes": (smart_quotes, 0, 0, "straight → typographic quotes and apostrophes"),
+    "straightquotes": (straight_quotes, 0, 0, "typographic quotes and guillemets → straight"),
     "stats": (text_stats, 0, 0, "word, character and line counts"),
     "words": (lambda s: str(len(s.split())), 0, 0, "word count"),
     "chars": (lambda s: str(len(s)), 0, 0, "character count"),

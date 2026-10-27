@@ -39,7 +39,8 @@ clipboard if nothing was typed.
 
 Other bundled examples: LaTeX/Markdown wrappers (`emph`, `cite`, `latex`, `mdlink`,
 `guil`), Latin helpers (`annus`, `roman`, `unroman`, `macrons`), `wc` (word count),
-`on next friday` (plain-English dates) and symbols (`em`, `en`, `sect`, `para`, `check`).
+`on next friday` (plain-English dates), quote conversions (`g2d`, `d2g`, `g2s`, `d2s`,
+`smartq`, `straightq`, built on the `quotes(from, to)` filter) and symbols (`em`, `en`, `sect`, `para`, `check`).
 
 Slow abbreviations can set `lazy = true` ("Compute only when Enter is pressed" in the
 dialog): KRunner shows the description instead of a live result, and the expansion runs

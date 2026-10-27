@@ -35,6 +35,13 @@
 #   nomacrons vtou jtoi                    Latin: ā → a, v → u, j → i
 #   latex                                  escape & % $ # _ { } ~ ^ \
 #   stats words chars                      "12 words · 70 characters · 2 lines"
+#   quotes(from, to)                       convert quote styles; give several pairs to
+#                                          convert them together (safe for nesting):
+#                                          quotes(guillemets, double, double, single)
+#                                          styles: straight straight-single double single
+#                                          guillemets single-guillemets french low low-single,
+#                                          or a literal pair such as «» or “”
+#   smartquotes straightquotes             "…" '…' → “…” ‘…’ (with apostrophes) / back
 #   sh(command)                            pipe through a shell command: sh(sort -u)
 # Quote filter arguments that contain spaces or commas: replace(" ", "_").
 # In {cmd:...}, write shell pipes with spaces ("a | sort") so they aren't read as filters.
@@ -177,6 +184,37 @@ text = '{cmd:curl -sLf -H "Accept: application/x-bibtex; charset=utf-8" "https:/
 description = "BibTeX for a DOI (typed or copied)"
 icon = "bookmarks"
 lazy = true             # computed only when Enter is pressed
+
+# --- quotes (clipboard or typed text)
+[abbr.g2d]
+text = "{input|quotes(guillemets, double, double, single)}"
+description = "«…“…”…» → “…‘…’…”"
+icon = "format-text-blockquote"
+
+[abbr.d2g]
+text = "{input|quotes(double, guillemets, single, double)}"
+description = "“…‘…’…” → «…“…”…»"
+icon = "format-text-blockquote"
+
+[abbr.g2s]
+text = "{input|quotes(guillemets, single)}"
+description = "«…» → ‘…’"
+icon = "format-text-blockquote"
+
+[abbr.d2s]
+text = "{input|quotes(double, single, single, double)}"
+description = "“…” ⇄ ‘…’ (swaps nested quotes too)"
+icon = "format-text-blockquote"
+
+[abbr.smartq]
+text = "{input|smartquotes}"
+description = "\"…\" '…' → “…” ‘…’ (and apostrophes)"
+icon = "format-text-blockquote"
+
+[abbr.straightq]
+text = "{input|straightquotes}"
+description = "“…” ‘…’ «…» „…“ → \"…\" '…'"
+icon = "format-text-blockquote"
 
 # --- static text (table form with a description)
 [abbr.sig]
