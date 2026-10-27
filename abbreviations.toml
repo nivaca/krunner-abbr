@@ -12,7 +12,7 @@
 #   {now}                ISO date-time        2026-10-27T14:05:09
 #   {date:%d/%m/%Y}      any strftime format after ':'
 #   {date+1d}            offsets: s m h d w mo(nths) y, chainable: {now+1w-2h:%c}
-#   {arg}                text typed after the abbreviation ("gh nivaca")
+#   {arg}                text typed after the abbreviation ("gh octocat")
 #   {arg:default}        ... with a default when nothing is typed
 #   {uuid}               random UUID4
 #   {env:USER}           environment variable
@@ -57,33 +57,33 @@ cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
 
 [abbr]
 # --- dates & times
-isod = "{date}"
-isodt = "{now}"
-isot = "{time}"
-ts = "{now:%Y%m%d-%H%M%S}"
-tmrw = "{date+1d}"
-yday = "{date-1d}"
-nweek = "{date+1w}"
-dmy = "{date:%d/%m/%Y}"
-longd = "{date:%A, %d %B %Y}"
-week = "{date:%G-W%V}"
-epoch = "{now:%s}"
+isod = { text = "{date}", description = "Today's date (ISO)" }
+isodt = { text = "{now}", description = "Date and time (ISO)" }
+isot = { text = "{time}", description = "Current time" }
+ts = { text = "{now:%Y%m%d-%H%M%S}", description = "Timestamp for file names" }
+tmrw = { text = "{date+1d}", description = "Tomorrow's date" }
+yday = { text = "{date-1d}", description = "Yesterday's date" }
+nweek = { text = "{date+1w}", description = "Date one week from today" }
+dmy = { text = "{date:%d/%m/%Y}", description = "Today as day/month/year" }
+longd = { text = "{date:%A, %d %B %Y}", description = "Today, written out" }
+week = { text = "{date:%G-W%V}", description = "ISO week number" }
+epoch = { text = "{now:%s}", description = "Unix timestamp" }
 
 # --- misc dynamic
-uuid = "{uuid}"
-me = "{env:USER}"
-quote = "“{clipboard}”"
-kernel = "{cmd:uname -r}"
+uuid = { text = "{uuid}", description = "Random UUID" }
+me = { text = "{env:USER}", description = "Your user name" }
+quote = { text = "“{clipboard}”", description = "Clipboard in “curly quotes”" }
+kernel = { text = "{cmd:uname -r}", description = "Linux kernel version" }
 
 # --- with arguments
-gh = "https://github.com/{arg:nivaca}"
+gh = { text = "https://github.com/{arg}", description = "GitHub URL: gh username" }
 
 # --- symbols
-em = "—"
-en = "–"
-sect = "§"
-para = "¶"
-check = "✓"
+em = { text = "—", description = "Em dash" }
+en = { text = "–", description = "En dash" }
+sect = { text = "§", description = "Section sign" }
+para = { text = "¶", description = "Pilcrow (paragraph sign)" }
+check = { text = "✓", description = "Check mark" }
 
 # --- clipboard (or typed text) transformations: copy, then e.g. "abbr title"
 [abbr.title]
@@ -216,14 +216,77 @@ text = "{input|straightquotes}"
 description = "“…” ‘…’ «…» „…“ → \"…\" '…'"
 icon = "format-text-blockquote"
 
+# --- legal and typographic symbols
+[abbr.copy]
+text = "©"
+description = "Copyright"
+
+[abbr.crme]
+text = "© {date:%Y} Your Name"
+description = "Copyright notice, current year"
+
+[abbr.reg]
+text = "®"
+description = "Registered trademark"
+
+[abbr.tm]
+text = "™"
+description = "Trademark"
+
+[abbr.sm]
+text = "℠"
+description = "Service mark"
+
+[abbr.phono]
+text = "℗"
+description = "Sound recording copyright"
+
+[abbr.copyleft]
+text = "🄯"
+description = "Copyleft"
+
+[abbr.deg]
+text = "°"
+description = "Degree"
+
+[abbr.dag]
+text = "†"
+description = "Dagger"
+
+[abbr.ddag]
+text = "‡"
+description = "Double dagger"
+
+[abbr.bullet]
+text = "•"
+description = "Bullet"
+
+[abbr.ell]
+text = "…"
+description = "Ellipsis"
+
+[abbr.times]
+text = "×"
+description = "Multiplication sign"
+
+[abbr.nbsp]
+text = " "
+description = "Non-breaking space (invisible)"
+icon = "format-text-symbol"
+
+[abbr.nnbsp]
+text = " "
+description = "Narrow non-breaking space (invisible)"
+icon = "format-text-symbol"
+
 # --- static text (table form with a description)
 [abbr.sig]
 text = """
 Best,
-Nicolas Vaughan"""
+Your Name"""
 description = "Email signature"
 icon = "mail-signed"
 
 [abbr.mail]
-text = "nivaca@fastmail.com"
+text = "you@example.com"
 description = "Email address"

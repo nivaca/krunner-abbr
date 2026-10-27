@@ -14,12 +14,12 @@ import sys
 import tomllib
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTabWidget, QToolButton,
-    QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
+    QStyleOptionViewItem, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 import krunner_abbr as k
@@ -122,12 +122,50 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
 # ---------------------------------------------------------------- dialog
 
 
+class EntryDelegate(QStyledItemDelegate):
+    """List row: the abbreviation, then its description (Qt.UserRole) in muted text."""
+
+    GAP = 12
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        key, desc = opt.text, index.data(Qt.UserRole) or ""
+        opt.text = ""
+        style = opt.widget.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, opt.widget).adjusted(2, 0, -4, 0)
+
+        # align descriptions in a column after the widest key (capped at 45% of the row)
+        fm = opt.fontMetrics
+        model = index.model()
+        widest = max(fm.horizontalAdvance(model.index(r, 0).data() or "")
+                     for r in range(model.rowCount()))
+        key_width = min(widest, int(rect.width() * 0.45))
+
+        selected = bool(opt.state & QStyle.State_Selected)
+        group = QPalette.Active if opt.state & QStyle.State_Active else QPalette.Inactive
+        painter.save()
+        painter.setPen(opt.palette.color(group, QPalette.HighlightedText if selected else QPalette.Text))
+        key_rect = rect.adjusted(0, 0, -(rect.width() - key_width), 0)
+        painter.drawText(key_rect, Qt.AlignVCenter | Qt.AlignLeft,
+                         fm.elidedText(key, Qt.ElideRight, key_rect.width()))
+        if desc:
+            desc_rect = rect.adjusted(key_width + self.GAP, 0, 0, 0)
+            muted = QPalette.HighlightedText if selected else QPalette.PlaceholderText
+            painter.setPen(opt.palette.color(group, muted))
+            painter.drawText(desc_rect, Qt.AlignVCenter | Qt.AlignLeft,
+                             fm.elidedText(desc, Qt.ElideRight, desc_rect.width()))
+        painter.restore()
+
+
+
 class SettingsDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Abbreviations Settings")
         self.setWindowIcon(QIcon.fromTheme("edit-paste"))
-        self.resize(860, 560)
+        self.resize(940, 600)
         self.path = k.CONFIG_FILE
         self.entries: list[dict] = []
         self.dirty = False
@@ -200,6 +238,7 @@ class SettingsDialog(QDialog):
         self.filter_edit = QLineEdit(placeholderText="Filter…", clearButtonEnabled=True)
         self.filter_edit.textChanged.connect(self.apply_filter)
         self.list = QListWidget()
+        self.list.setItemDelegate(EntryDelegate(self.list))
         self.list.currentRowChanged.connect(self.show_entry)
 
         add_btn = QPushButton(QIcon.fromTheme("list-add"), "Add")
@@ -298,7 +337,7 @@ class SettingsDialog(QDialog):
         splitter.addWidget(left)
         splitter.addWidget(self.editor)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([250, 600])
+        splitter.setSizes([340, 520])
         return splitter
 
     @staticmethod
@@ -425,6 +464,7 @@ class SettingsDialog(QDialog):
     def _refresh_item(item: QListWidgetItem, e: dict):
         item.setText(e["key"] or "(unnamed)")
         item.setIcon(QIcon.fromTheme(e["icon"] or "edit-paste"))
+        item.setData(Qt.UserRole, e["description"])
         item.setToolTip(e["description"] or k.one_line(e["text"], 80))
 
     def current(self) -> dict | None:
