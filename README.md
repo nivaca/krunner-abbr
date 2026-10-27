@@ -16,7 +16,9 @@ To remove it, run `./uninstall.sh`. Your abbreviations file is kept unless you a
 
 ## Settings
 
-Type `abbr settings` in KRunner (`<keyword> settings` if you changed the keyword), or
+Type `abbr help` for a reference page (placeholders, filters, quote styles) or
+`abbr list` for a searchable table of every abbreviation and its current expansion;
+both open in your browser. Type `abbr settings` in KRunner (`<keyword> settings` if you changed the keyword), or
 run `./krunner_abbr_settings.py` (needs PySide6). It sets the trigger keyword, partial-match
 suggestions and the command timeout, and lets you add and edit abbreviations with a
 live preview. Saving rewrites the config file and keeps the previous version as

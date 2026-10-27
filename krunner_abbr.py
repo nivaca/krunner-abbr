@@ -38,7 +38,15 @@ SETTINGS_APP = HERE / "krunner_abbr_settings.py"
 
 DEFAULT_PREFIX = "abbr"
 SETTINGS_WORD = "settings"  # "<keyword> settings" opens the settings dialog
-SETTINGS_ID = "\x1esettings"
+# built-in commands: word -> (title, subtext, icon); match ids are "\x1e" + word
+BUILTINS = {
+    SETTINGS_WORD: ("Abbreviations Settings", "Open the settings dialog", "configure"),
+    "help": ("Abbreviations Help", "Open the reference: placeholders, filters, quote styles",
+             "help-contents"),
+    "list": ("All Abbreviations", "Open a table of every abbreviation and its expansion",
+             "view-list-details"),
+}
+BUILTIN_ID = "\x1e"
 
 # KRunner match categories (Plasma 6 QueryMatch::CategoryRelevance)
 HIGHEST = 100
@@ -179,11 +187,16 @@ ROMAN = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC
          (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
 
 
+def quoted(text: str, limit: int = 40) -> str:
+    """Short quoted excerpt of input for error messages."""
+    return f"“{one_line(text.strip(), limit)}”"
+
+
 def to_roman(text: str) -> str:
     try:
         n = int(text.strip())
     except ValueError:
-        raise ValueError(f"|roman needs a whole number, got {text.strip()!r}") from None
+        raise ValueError(f"|roman needs a whole number, got {quoted(text)}") from None
     if not 0 < n < 4000:
         raise ValueError(f"|roman works for 1–3999, got {n}")
     out = ""
@@ -197,13 +210,13 @@ def from_roman(text: str) -> str:
     numeral = text.strip().upper()
     values = {s: v for v, s in ROMAN if len(s) == 1}
     if not numeral or any(c not in values for c in numeral):
-        raise ValueError(f"not a Roman numeral: {text.strip()!r}")
+        raise ValueError(f"not a Roman numeral: {quoted(text)}")
     total = 0
     for i, c in enumerate(numeral):
         v = values[c]
         total += -v if i + 1 < len(numeral) and values[numeral[i + 1]] > v else v
     if not 0 < total < 4000 or to_roman(str(total)) != numeral:
-        raise ValueError(f"not a valid Roman numeral: {text.strip()!r}")
+        raise ValueError(f"not a valid Roman numeral: {quoted(text)}")
     return str(total)
 
 
@@ -615,20 +628,36 @@ def strip_trigger(query: str, trigger: str) -> str | None:
     return rest.lstrip()
 
 
-def settings_match(cfg: Config, query: str) -> int | None:
-    """Category of the "open settings" result for query, or None if it shouldn't show."""
-    # without a configured keyword, "abbr settings" still opens the dialog
+def builtin_matches(cfg: Config, query: str) -> list[tuple[str, int]]:
+    """(word, category) for each built-in command (settings, help, list) matching query."""
+    # without a configured keyword, "abbr settings" etc. still work
     rest = strip_trigger(query.strip(), cfg.prefix or DEFAULT_PREFIX)
     if rest is None:
-        return None
+        return []
     rest = rest.lower()
-    if rest == SETTINGS_WORD:
-        return HIGHEST
-    if not rest and cfg.prefix:
-        return LOW  # listed along with all abbreviations
-    if cfg.min_prefix_chars and len(rest) >= cfg.min_prefix_chars and SETTINGS_WORD.startswith(rest):
-        return LOW
-    return None
+    matches = []
+    for word in BUILTINS:
+        if rest == word:
+            matches.append((word, HIGHEST))
+        elif not rest and cfg.prefix:
+            matches.append((word, LOW))  # listed along with all abbreviations
+        elif cfg.min_prefix_chars and len(rest) >= cfg.min_prefix_chars and word.startswith(rest):
+            matches.append((word, LOW))
+    return matches
+
+
+def run_builtin(cfg: Config, word: str) -> None:
+    if word == SETTINGS_WORD:
+        subprocess.Popen([sys.executable, str(SETTINGS_APP)], start_new_session=True)
+        return
+    import krunner_abbr_help
+
+    try:
+        path = krunner_abbr_help.write_page(word, cfg)
+    except Exception as e:
+        notify(f"Could not build the {word} page", str(e), "dialog-error")
+        return
+    subprocess.Popen(["xdg-open", str(path)], start_new_session=True)
 
 
 def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
@@ -686,11 +715,12 @@ def run_service() -> None:
             cfg.reload_if_changed()
             self.shown = {}
             results = []
-            if (category := settings_match(cfg, query)) is not None:
+            for word, category in builtin_matches(cfg, query):
+                title, subtext, icon = BUILTINS[word]
                 results.append((
-                    SETTINGS_ID, "Abbreviations Settings", "configure", category,
+                    BUILTIN_ID + word, title, icon, category,
                     1.0 if category == HIGHEST else 0.4,
-                    {"subtext": "Open the settings dialog", "category": "Abbreviations"},
+                    {"subtext": subtext, "category": "Abbreviations"},
                 ))
             for abbr, arg, category in find_matches(cfg, query):
                 match_id = f"{abbr['key']}\x1f{arg}"
@@ -727,8 +757,8 @@ def run_service() -> None:
 
         @dbus.service.method(IFACE, in_signature="ss")
         def Run(self, match_id: str, action_id: str):
-            if match_id == SETTINGS_ID:
-                subprocess.Popen([sys.executable, str(SETTINGS_APP)], start_new_session=True)
+            if match_id.startswith(BUILTIN_ID):
+                run_builtin(cfg, match_id[len(BUILTIN_ID):])
                 return
             key, _, arg = match_id.partition("\x1f")
             abbr = cfg.abbrs.get(key.lower())
@@ -783,7 +813,17 @@ def main() -> None:
     ap.add_argument("--expand", nargs="+", metavar=("QUERY", "ARG"),
                     help="print the matches for QUERY (as typed in KRunner) and exit")
     ap.add_argument("--list", action="store_true", help="list all abbreviations with their expansion")
+    ap.add_argument("--page", choices=["help", "list"],
+                    help="write the help or list page and print its path")
     args = ap.parse_args()
+
+    if args.page:
+        import krunner_abbr_help
+
+        cfg = Config(CONFIG_FILE if CONFIG_FILE.exists() else EXAMPLE_CONFIG)
+        cfg.reload_if_changed()
+        print(krunner_abbr_help.write_page(args.page, cfg))
+        return
 
     if args.expand or args.list:
         cfg = Config(CONFIG_FILE if CONFIG_FILE.exists() else EXAMPLE_CONFIG)
@@ -799,12 +839,16 @@ def main() -> None:
                 print(f"{abbr['key']:<12} {one_line(text, SUBTEXT_MAX)}")
             return
         query = " ".join(args.expand)
-        if settings_match(cfg, query) is not None:
-            print("[settings] opens the settings dialog")
+        for word, _ in builtin_matches(cfg, query):
+            print(f"[{word}] {BUILTINS[word][1]}")
         for abbr, arg, category in find_matches(cfg, query):
             tag = "exact " if category == HIGHEST else "prefix"
             timeout = LAZY_TIMEOUT if abbr.get("lazy") else cfg.cmd_timeout
-            print(f"[{tag}] {abbr['key']}: {expand(abbr['text'], arg, timeout)}")
+            try:
+                text = expand(abbr["text"], arg, timeout)
+            except Exception as e:
+                text = f"ERROR: {e}"
+            print(f"[{tag}] {abbr['key']}: {text}")
         return
 
     run_service()
