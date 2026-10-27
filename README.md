@@ -45,6 +45,10 @@ Other bundled examples: LaTeX/Markdown wrappers (`emph`, `cite`, `latex`, `mdlin
 `smartq`, `straightq`, built on the `quotes(from, to)` filter), list sorting (`sort`, `sortr`,
 `sortu`, `sortc`, `numl`) and symbols (`em`, `en`, `sect`, `para`, `check`).
 
+`{ask:Label}` and `{asktext:Label}` open an input dialog when you press Enter and use
+the answer, which filters and commands can then process: `{ask:DOI|sh(…)}`, or
+`$ABBR_ASK` inside `{cmd:…}`. Examples: `citep`, `letter`, `days`, `askdoi`.
+
 Set `notify = true` (or tick "Show a notification after copying" in the dialog) for a
 desktop notification after every copy.
 

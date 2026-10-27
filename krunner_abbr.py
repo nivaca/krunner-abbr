@@ -412,6 +412,7 @@ FILTERS = {
     "straightquotes": (straight_quotes, 0, 0, "typographic quotes and guillemets → straight"),
     "stats": (text_stats, 0, 0, "word, character and line counts"),
     "words": (lambda s: str(len(s.split())), 0, 0, "word count"),
+    "silent": (lambda s: "", 0, 0, "discard the value, e.g. an {ask} used only by a later {cmd}"),
     "chars": (lambda s: str(len(s)), 0, 0, "character count"),
     "sh": (shell_filter, 1, 1, "pipe through a shell command: sh(sort -u)"),
 }
@@ -545,11 +546,69 @@ DATE_DEFAULTS = {
 }
 
 
+ASK_NAMES = ("ask", "asktext")  # {ask:Label=default} one line, {asktext:Label} multi-line
+
+
+def parse_ask(spec: str | None) -> tuple[str, str]:
+    label, _, default = (spec or "").partition("=")
+    return label.strip() or "Input", default
+
+
+def ask_prompts(template: str) -> list[tuple[str, str, str]]:
+    """(name, label, default) for each prompt in template, in order; repeats ask once."""
+    prompts, seen = [], set()
+    for m in PLACEHOLDER_RE.finditer(template):
+        if m["name"] not in ASK_NAMES:
+            continue
+        rest = m["rest"] or ""
+        label, default = parse_ask(split_spec(rest[1:])[0] if rest.startswith(":") else None)
+        if (m["name"], label) not in seen:
+            seen.add((m["name"], label))
+            prompts.append((m["name"], label, default))
+    return prompts
+
+
+def needs_input(template: str) -> bool:
+    return any(m["name"] in ASK_NAMES for m in PLACEHOLDER_RE.finditer(template))
+
+
+def kdialog_prompt(name: str, label: str, default: str) -> str | None:
+    """Ask with a KDE dialog; None if cancelled."""
+    box = "--textinputbox" if name == "asktext" else "--inputbox"
+    res = subprocess.run(["kdialog", "--title", "Abbreviations", box, label, default],
+                         capture_output=True, text=True)
+    return res.stdout.removesuffix("\n") if res.returncode == 0 else None
+
+
+def terminal_prompt(name: str, label: str, default: str) -> str | None:
+    """Ask on the terminal (for --expand); {asktext} reads until an empty line."""
+    try:
+        if name == "asktext":
+            print(f"{label} (end with an empty line):")
+            lines = iter(input, "")
+            return "\n".join(lines) or default
+        return input(f"{label}{f' [{default}]' if default else ''}: ") or default
+    except EOFError:
+        return None
+
+
+def collect_answers(template: str, prompt=kdialog_prompt) -> dict | None:
+    """Prompt for every {ask}/{asktext} in template; None if the user cancels."""
+    answers = {}
+    for name, label, default in ask_prompts(template):
+        value = prompt(name, label, default)
+        if value is None:
+            return None
+        answers[(name, label)] = value
+    return answers
+
+
 def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
-           clipboard: str | None = None) -> str:
+           clipboard: str | None = None, answers: dict | None = None) -> str:
     """Expand all placeholders in template. Raises ValueError on bad input.
 
-    Pass clipboard to use a pre-read value instead of querying the clipboard.
+    Pass clipboard to use a pre-read value instead of querying the clipboard, and
+    answers (from collect_answers) to fill {ask} and {asktext} prompts.
     """
     now = datetime.now().astimezone()
 
@@ -580,10 +639,18 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
             return clip()
         if name == "input":  # text typed after the abbreviation, else the clipboard
             return arg or clip()
+        if name in ASK_NAMES:
+            key = (name, parse_ask(spec)[0])
+            if answers is None or key not in answers:
+                raise ValueError(f"{m[0]} asks for input when Enter is pressed")
+            return answers[key]
         if name == "cmd":
             if not spec:
                 raise ValueError("{cmd:...} needs a command")
             env = dict(os.environ, ABBR_ARG=arg)
+            for i, value in enumerate((answers or {}).values(), 1):
+                env[f"ABBR_ASK{i}"] = value
+                env.setdefault("ABBR_ASK", value)
             if "ABBR_INPUT" in spec:
                 env["ABBR_INPUT"] = (arg or clip()).strip()
             res = subprocess.run(
@@ -607,6 +674,11 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
             out.append(c)
             i += 1
     return "".join(out)
+
+
+def is_lazy(abbr: dict) -> bool:
+    """Computed only when Enter is pressed: marked lazy, or prompts for input."""
+    return bool(abbr.get("lazy")) or needs_input(abbr["text"])
 
 
 def uses_arg(template: str) -> bool:
@@ -767,13 +839,14 @@ def run_service() -> None:
             for abbr, arg, category in find_matches(cfg, query):
                 match_id = f"{abbr['key']}\x1f{arg}"
                 relevance = 1.0 if category == HIGHEST else 0.5
-                if abbr.get("lazy"):  # computed in Run, e.g. network lookups
+                if is_lazy(abbr):  # computed in Run: slow commands, or prompts for input
                     label = abbr.get("description") or one_line(abbr["text"], 200)
+                    hint = ("press Enter, then fill in the prompt" if needs_input(abbr["text"])
+                            else "press Enter to run and copy")
                     results.append((
                         match_id, f"{label}: {arg}" if arg else label,
                         abbr.get("icon", "system-run"), category, relevance,
-                        {"subtext": f"{abbr['key']} · press Enter to run and copy",
-                         "category": "Abbreviations"},
+                        {"subtext": f"{abbr['key']} · {hint}", "category": "Abbreviations"},
                     ))
                     continue
                 try:
@@ -807,7 +880,7 @@ def run_service() -> None:
             text = self.shown.get(match_id)
             if abbr is None and text is None:
                 return
-            if abbr is not None and abbr.get("lazy"):
+            if abbr is not None and is_lazy(abbr):
                 self.run_lazy(abbr, arg)
                 return
             if text is None:  # stale id: recompute
@@ -826,7 +899,10 @@ def run_service() -> None:
 
             def work():
                 try:
-                    text, error = expand(abbr["text"], arg, LAZY_TIMEOUT, clipboard), None
+                    answers = collect_answers(abbr["text"])
+                    if answers is None:
+                        return  # prompt cancelled: copy nothing
+                    text, error = expand(abbr["text"], arg, LAZY_TIMEOUT, clipboard, answers), None
                 except Exception as e:
                     text, error = None, e
                 GLib.idle_add(finish, text, error)
@@ -877,6 +953,10 @@ def main() -> None:
             sys.exit(cfg.error)
         if args.list:
             for abbr in cfg.abbrs.values():
+                if needs_input(abbr["text"]):
+                    labels = ", ".join(label for _, label, _ in ask_prompts(abbr["text"]))
+                    print(f"{abbr['key']:<12} (asks for: {labels})")
+                    continue
                 try:
                     text = expand(abbr["text"], timeout=cfg.cmd_timeout)
                 except Exception as e:
@@ -888,9 +968,15 @@ def main() -> None:
             print(f"[{word}] {BUILTINS[word][1]}")
         for abbr, arg, category in find_matches(cfg, query):
             tag = "exact " if category == HIGHEST else "prefix"
-            timeout = LAZY_TIMEOUT if abbr.get("lazy") else cfg.cmd_timeout
+            timeout = LAZY_TIMEOUT if is_lazy(abbr) else cfg.cmd_timeout
+            answers = None
+            if needs_input(abbr["text"]):
+                if category != HIGHEST or not sys.stdin.isatty():
+                    print(f"[{tag}] {abbr['key']}: (asks for input)")
+                    continue
+                answers = collect_answers(abbr["text"], terminal_prompt)
             try:
-                text = expand(abbr["text"], arg, timeout)
+                text = expand(abbr["text"], arg, timeout, answers=answers)
             except Exception as e:
                 text = f"ERROR: {e}"
             print(f"[{tag}] {abbr['key']}: {text}")

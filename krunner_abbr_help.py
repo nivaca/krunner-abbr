@@ -25,9 +25,13 @@ PLACEHOLDER_DOCS = [
     ("{arg:default}", "… with a default when nothing is typed", None),
     ("{clipboard}", "Current clipboard contents", None),
     ("{input}", "Typed text if any, otherwise the clipboard", None),
+    ("{ask:Label}", "Opens an input box when Enter is pressed; {ask:Label=default} pre-fills it",
+     None),
+    ("{asktext:Label}", "Same, with a multi-line box", None),
     ("{uuid}", "Random UUID", "{uuid}"),
     ("{env:USER}", "Environment variable", "{env:USER}"),
-    ("{cmd:command}", "Output of a shell command; $ABBR_ARG and $ABBR_INPUT hold {arg} and {input}",
+    ("{cmd:command}", "Output of a shell command; $ABBR_ARG and $ABBR_INPUT hold {arg} and "
+     "{input}, $ABBR_ASK1, $ABBR_ASK2… the answers to prompts ($ABBR_ASK the first)",
      None),
     ("{{  }}", "Literal braces: \\emph{{{input}}} gives \\emph{text}", None),
 ]
@@ -161,7 +165,8 @@ def help_page(cfg) -> str:
       {c(typed(cfg if cfg.prefix else _default(cfg), "help"))} this page and
       {c(typed(cfg if cfg.prefix else _default(cfg), "list"))} the table of abbreviations.</li>
   <li>Abbreviations marked <span class="badge">on Enter</span> run only when you press Enter
-      (for slow commands); a notification shows what was copied.</li>
+      (slow commands, or ones that ask for input in a dialog first); a notification shows
+      what was copied. Cancelling a prompt copies nothing.</li>
 </ul>
 <p class="muted">Trigger keyword: {c(cfg.prefix) if cfg.prefix else "none"} ·
 Configuration: {c(str(k.CONFIG_FILE))}</p>
@@ -233,14 +238,17 @@ def list_page(cfg) -> str:
     clipboard = k.get_clipboard()
     rows = []
     for abbr in sorted(cfg.abbrs.values(), key=lambda a: a["key"].lower()):
-        if abbr.get("lazy"):
+        if k.needs_input(abbr["text"]):
+            labels = ", ".join(label for _, label, _ in k.ask_prompts(abbr["text"]))
+            result = f'<span class="muted">asks for {escape(labels)} when Enter is pressed</span>'
+        elif abbr.get("lazy"):
             result = '<span class="muted">computed when Enter is pressed</span>'
         else:
             text, ok = safe_expand(abbr["text"], cfg.cmd_timeout, clipboard)
             if len(text) > LIST_RESULT_MAX:
                 text = text[:LIST_RESULT_MAX - 1] + "…"
             result = f'<span class="result{"" if ok else " error"}">{escape(text)}</span>'
-        badge = '<span class="badge">on Enter</span>' if abbr.get("lazy") else ""
+        badge = '<span class="badge">on Enter</span>' if k.is_lazy(abbr) else ""
         rows.append(
             f"<tr><td class=nowrap><code>{escape(typed(cfg, abbr['key']))}</code>{badge}</td>"
             f"<td>{escape(abbr.get('description', ''))}</td>"

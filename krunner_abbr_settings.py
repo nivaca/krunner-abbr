@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
     QStyleOptionViewItem, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
@@ -42,6 +42,8 @@ PLACEHOLDERS = [
     (None, None),
     ("Clipboard contents", "{clipboard}"),
     ("Typed argument, else clipboard", "{input}"),
+    ("Ask for input (dialog)", "{ask:Label}"),
+    ("Ask for multi-line text (dialog)", "{asktext:Label}"),
     ("Random UUID", "{uuid}"),
     ("Environment variable", "{env:USER}"),
     ("Shell command output", "{cmd:echo hello}"),
@@ -566,21 +568,35 @@ class SettingsDialog(QDialog):
             self.text_edit.setTextCursor(cursor)
         self.insert_placeholder(snippet)
 
+    def prompt(self, name: str, label: str, default: str) -> str | None:
+        """Qt version of the runner's input dialog, for Run Now."""
+        if name == "asktext":
+            value, ok = QInputDialog.getMultiLineText(self, "Abbreviations", label, default)
+        else:
+            value, ok = QInputDialog.getText(self, "Abbreviations", label, text=default)
+        return value if ok else None
+
     def update_preview(self, force: bool = False):
         e = self.current()
-        lazy = bool(e and e["lazy"])
+        asks = bool(e and k.needs_input(e["text"]))
+        lazy = bool(e and e["lazy"]) or asks
         self.run_now_btn.setVisible(lazy)
         if e is None:
             self.preview.setPlainText("")
             return
         if lazy and not force:
             self.preview.setStyleSheet("")
-            self.preview.setPlainText("Computed when Enter is pressed. Click Run Now to test it.")
+            self.preview.setPlainText(
+                "Asks for input when Enter is pressed. Click Run Now to test it." if asks else
+                "Computed when Enter is pressed. Click Run Now to test it.")
             return
+        answers = k.collect_answers(e["text"], self.prompt) if asks else None
+        if asks and answers is None:
+            return  # cancelled
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             timeout = k.LAZY_TIMEOUT if lazy else self.timeout_spin.value()
-            result = k.expand(e["text"], self.arg_edit.text().strip(), timeout)
+            result = k.expand(e["text"], self.arg_edit.text().strip(), timeout, answers=answers)
             self.preview.setStyleSheet("")
         except Exception as ex:
             result = f"Error: {ex}"

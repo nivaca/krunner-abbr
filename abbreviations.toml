@@ -18,8 +18,12 @@
 #   {env:USER}           environment variable
 #   {clipboard}          current clipboard contents
 #   {input}              text typed after the abbreviation, or else the clipboard
+#   {ask:Label}          opens an input box when Enter is pressed; {ask:Label=default}
+#                        pre-fills it; the same label asks once. Cancel copies nothing.
+#   {asktext:Label}      same, with a multi-line box
 #   {cmd:shell command}  stdout of a command (see cmd_timeout); $ABBR_ARG holds {arg},
-#                        $ABBR_INPUT holds {input}. Placeholders can't contain { or }.
+#                        $ABBR_INPUT holds {input}, $ABBR_ASK1, $ABBR_ASK2… the answers
+#                        to prompts ($ABBR_ASK the first). Placeholders can't contain { or }.
 #   {{ and }}            literal braces: \emph{{{input}}} → \emph{text}
 #
 # Filters transform any placeholder and can be chained: {clipboard|unhyphen|join}
@@ -45,6 +49,7 @@
 #                                          or a literal pair such as «» or “”
 #   smartquotes straightquotes             "…" '…' → “…” ‘…’ (with apostrophes) / back
 #   sh(command)                            pipe through a shell command: sh(sort -u)
+#   silent                                 discard the value: {ask:N|silent}{cmd:… $ABBR_ASK …}
 # Quote filter arguments that contain spaces or commas: replace(" ", "_").
 # In {cmd:...}, write shell pipes with spaces ("a | sort") so they aren't read as filters.
 #
@@ -307,6 +312,33 @@ icon = "view-sort-ascending"
 text = "{input|number}"
 description = "Number clipboard lines: 1. 2. 3."
 icon = "format-list-ordered"
+
+# --- prompts: these open an input dialog when Enter is pressed
+[abbr.citep]
+text = '\cite[p.~{ask:Page}]{{{input}}}'
+description = '\cite[p.~N]{key}: asks for the page'
+icon = "format-text-code"
+
+[abbr.letter]
+text = '''
+Dear {ask:Name},
+
+{asktext:Message}
+
+Best,
+Your Name'''
+description = "Short letter: asks for name and message"
+icon = "mail-message-new"
+
+[abbr.days]
+text = '{ask:Date (e.g. 2026-12-25 or next friday)|sh(n=$(( ($(date -d "$(cat)" +%s) - $(date -d today +%s)) / 86400 )); [ "$n" -eq 1 ] && echo "1 day" || echo "$n days")}'
+description = "Days until a date (asks for it)"
+icon = "view-calendar"
+
+[abbr.askdoi]
+text = '{ask:DOI|sh(curl -sLf -H "Accept: application/x-bibtex; charset=utf-8" "https://doi.org/$(sed "s|.*doi.org/||")")|strip}'
+description = "BibTeX for a DOI (asks for it)"
+icon = "bookmarks"
 
 # --- static text (table form with a description)
 [abbr.sig]
