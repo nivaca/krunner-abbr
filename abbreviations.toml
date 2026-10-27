@@ -17,8 +17,22 @@
 #   {uuid}               random UUID4
 #   {env:USER}           environment variable
 #   {clipboard}          current clipboard contents
+#   {input}              text typed after the abbreviation, or else the clipboard
 #   {cmd:shell command}  stdout of a command (see cmd_timeout; $ABBR_ARG holds {arg})
 #   {{ and }}            literal braces
+#
+# Filters transform any placeholder and can be chained: {clipboard|unhyphen|join}
+#   upper lower title sentence swapcase   case (title = English title case)
+#   join  join(", ")                       join lines with a space / a separator
+#   unhyphen                               rejoin words hyphenated across lines (PDFs)
+#   squeeze strip                          collapse runs of spaces / trim
+#   replace(old, new)  sub(regex, repl)    literal / regex replacement
+#   deaccent slug snake camel              café → cafe, url-slug, snake_case, camelCase
+#   sort uniq                              sort lines / drop duplicate lines
+#   urlencode urldecode base64 unbase64
+#   sh(command)                            pipe through a shell command: sh(sort -u)
+# Quote filter arguments that contain spaces or commas: replace(" ", "_").
+# In {cmd:...}, write shell pipes with spaces ("a | sort") so they aren't read as filters.
 #
 # Values are either a plain string or a table with text / description / icon.
 
@@ -49,7 +63,42 @@ kernel = "{cmd:uname -r}"
 
 # --- with arguments
 gh = "https://github.com/{arg:nivaca}"
-upper = "{cmd:printf %s \"$ABBR_ARG\" | tr a-z A-Z}"
+
+# --- clipboard (or typed text) transformations: copy, then e.g. "abbr title"
+[abbr.title]
+text = "{input|title}"
+description = "Clipboard or typed text → Title Case"
+icon = "format-text-capitalize"
+
+[abbr.lower]
+text = "{input|lower}"
+description = "Clipboard or typed text → lowercase"
+icon = "format-text-lowercase"
+
+[abbr.upper]
+text = "{input|upper}"
+description = "Clipboard or typed text → UPPERCASE"
+icon = "format-text-uppercase"
+
+[abbr.sentence]
+text = "{input|sentence}"
+description = "Clipboard or typed text → Sentence case"
+icon = "format-text-capitalize"
+
+[abbr.join]
+text = "{input|join}"
+description = "Join clipboard lines into one"
+icon = "format-join-node"
+
+[abbr.unwrap]
+text = "{input|unhyphen|join|squeeze}"
+description = "Clean up text copied from a PDF"
+icon = "format-join-node"
+
+[abbr.slug]
+text = "{input|slug}"
+description = "Clipboard or typed text → url-slug"
+icon = "edit-link"
 
 # --- static text (table form with a description)
 [abbr.sig]

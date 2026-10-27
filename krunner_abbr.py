@@ -9,7 +9,9 @@ Run with --expand KEY [ARG...] to test an abbreviation from the shell.
 """
 
 import argparse
+import base64
 import calendar
+import csv
 import locale
 import os
 import re
@@ -17,6 +19,8 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import unicodedata
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -42,9 +46,9 @@ LOW = 30
 CMD_TIMEOUT = 2.0  # default seconds for {cmd:...} placeholders
 SUBTEXT_MAX = 80
 
-# {name}, {name+1d-2h}, {name:spec}, {name+1w:spec}
+# {name}, {name+1d-2h}, {name:spec}, {name+1w:spec}, each optionally followed by |filters
 PLACEHOLDER_RE = re.compile(
-    r"\{(?P<name>[a-z_]+)(?P<offsets>(?:[+-]\d+(?:mo|[smhdwMy]))*)(?::(?P<spec>[^{}]*))?\}"
+    r"\{(?P<name>[a-z_]+)(?P<offsets>(?:[+-]\d+(?:mo|[smhdwMy]))*)(?P<rest>[:|][^{}]*)?\}"
 )
 OFFSET_RE = re.compile(r"([+-])(\d+)(mo|[smhdwMy])")
 
@@ -88,6 +92,191 @@ def set_clipboard(text: str) -> None:
     raise RuntimeError("no clipboard backend available (Klipper, wl-copy, xclip)")
 
 
+# ---------------------------------------------------------------- filters
+
+# words kept lowercase in English title case unless first or last (Chicago-style)
+SMALL_WORDS = set(
+    "a an and as at but by en for from if in into nor of off on onto or over per so the "
+    "to up upon v v. vs vs. via with yet".split()
+)
+LINEBREAK_RE = re.compile(r"\r\n|\r|\n| | |\x0b|\x0c|\x85")
+
+
+def _cap(word: str) -> str:
+    """Uppercase the first letter, leaving leading punctuation and the rest untouched."""
+    for i, c in enumerate(word):
+        if c.isalpha():
+            return word[:i] + c.upper() + word[i + 1:]
+    return word
+
+
+def title_case(text: str) -> str:
+    if text.isupper():  # ALL CAPS input carries no case information worth keeping
+        text = text.lower()
+
+    def line_title(line: str) -> str:
+        tokens = re.split(r"(\s+)", line)
+        words = [i for i, t in enumerate(tokens) if t and not t.isspace()]
+        for n, i in enumerate(words):
+            word = tokens[i]
+            core = re.sub(r"^\W+|\W+$", "", word).lower()
+            first = n == 0 or re.search(r"[:.!?—–]$", tokens[words[n - 1]])
+            last = n == len(words) - 1
+            letters = [c for c in word if c.isalpha()]
+            if any(c.isupper() for c in letters[1:]) or re.search(r"\w[./@]\w", word):
+                continue  # iPhone, NASA, e.g., URLs, emails: keep as typed
+            if core in SMALL_WORDS and not first and not last:
+                tokens[i] = word.lower()
+            else:
+                parts = word.split("-")
+                tokens[i] = "-".join(
+                    _cap(p) if j == 0 or p.lower() not in SMALL_WORDS else p.lower()
+                    for j, p in enumerate(parts)
+                )
+        return "".join(tokens)
+
+    return "".join(
+        line_title(part) if k % 2 == 0 else part
+        for k, part in enumerate(re.split(r"(\r\n|\r|\n)", text))
+    )
+
+
+def sentence_case(text: str) -> str:
+    text = text.lower()
+    return re.sub(r"(^\s*|[.!?]\s+)(\w)", lambda m: m[1] + m[2].upper(), text)
+
+
+def deaccent(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)
+    )
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[^\W_]+", deaccent(text))
+
+
+def join_lines(text: str, sep: str = " ") -> str:
+    return sep.join(p.strip() for p in LINEBREAK_RE.split(text) if p.strip())
+
+
+def unhyphen(text: str) -> str:
+    """Rejoin words hyphenated across line breaks (typical of text copied from PDFs)."""
+    text = text.replace("­", "")
+    return re.sub(r"(\w)[-‐]\s*(?:\r\n|\r|\n)\s*(\w)", r"\1\2", text)
+
+
+def regex_sub(text: str, pattern: str, repl: str = "") -> str:
+    try:
+        return re.sub(pattern, repl, text)
+    except re.error as e:
+        raise ValueError(f"bad regex {pattern!r}: {e}") from None
+
+
+def shell_filter(text: str, command: str, *, timeout: float) -> str:
+    res = subprocess.run(command, shell=True, input=text, capture_output=True, text=True,
+                         timeout=timeout)
+    return res.stdout.rstrip("\n")
+
+
+# name -> (function, min args, max args, description)
+FILTERS = {
+    "upper": (str.upper, 0, 0, "UPPERCASE"),
+    "lower": (str.lower, 0, 0, "lowercase"),
+    "title": (title_case, 0, 0, "English Title Case"),
+    "sentence": (sentence_case, 0, 0, "Sentence case"),
+    "swapcase": (str.swapcase, 0, 0, "sWAP cASE"),
+    "join": (join_lines, 0, 1, "join lines with a space, or join(sep)"),
+    "unhyphen": (unhyphen, 0, 0, "rejoin words hyphenated across lines"),
+    "squeeze": (lambda s: re.sub(r"[ \t ]+", " ", s), 0, 0, "collapse runs of spaces"),
+    "strip": (str.strip, 0, 0, "trim surrounding whitespace"),
+    "replace": (lambda s, old, new="": s.replace(old, new), 1, 2, "replace(old, new)"),
+    "sub": (regex_sub, 1, 2, "regex substitution: sub(pattern, repl)"),
+    "deaccent": (deaccent, 0, 0, "remove diacritics: café → cafe"),
+    "slug": (lambda s: "-".join(_words(s)).lower(), 0, 0, "url-slug"),
+    "snake": (lambda s: "_".join(_words(s)).lower(), 0, 0, "snake_case"),
+    "camel": (lambda s: "".join(w.lower() if i == 0 else w.capitalize()
+                                for i, w in enumerate(_words(s))), 0, 0, "camelCase"),
+    "sort": (lambda s: "\n".join(sorted(s.splitlines(), key=str.casefold)), 0, 0, "sort lines"),
+    "uniq": (lambda s: "\n".join(dict.fromkeys(s.splitlines())), 0, 0, "drop duplicate lines"),
+    "urlencode": (lambda s: urllib.parse.quote(s, safe=""), 0, 0, "percent-encode"),
+    "urldecode": (urllib.parse.unquote, 0, 0, "percent-decode"),
+    "base64": (lambda s: base64.b64encode(s.encode()).decode(), 0, 0, "base64-encode"),
+    "unbase64": (lambda s: base64.b64decode(s).decode(errors="replace"), 0, 0, "base64-decode"),
+    "sh": (shell_filter, 1, 1, "pipe through a shell command: sh(sort -u)"),
+}
+
+FILTER_NAME_RE = re.compile(r"\|([a-z][a-z0-9_]*)")
+
+
+def parse_filter_args(raw: str) -> list[str]:
+    """Comma-separated arguments; wrap one in double quotes to keep spaces or commas."""
+    if not raw.strip():
+        return []
+    row = next(csv.reader([raw], skipinitialspace=True))
+    return row
+
+
+def parse_filter_chain(chain: str) -> list[tuple[str, list[str]]]:
+    """Parse '|f1|f2(a, b)' into [(f1, []), (f2, [a, b])]. Raises ValueError."""
+    filters, pos = [], 0
+    while pos < len(chain):
+        m = FILTER_NAME_RE.match(chain, pos)
+        if not m:
+            raise ValueError(f"expected |filter at {chain[pos:]!r}")
+        name, pos = m[1], m.end()
+        if name not in FILTERS:
+            raise ValueError(f"unknown filter |{name}")
+        args = []
+        if pos < len(chain) and chain[pos] == "(":
+            depth, quoted, end = 0, False, None
+            for i in range(pos, len(chain)):
+                c = chain[i]
+                if c == '"':
+                    quoted = not quoted
+                elif not quoted and c == "(":
+                    depth += 1
+                elif not quoted and c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is None:
+                raise ValueError(f"unclosed ( in |{name}")
+            args, pos = parse_filter_args(chain[pos + 1:end]), end + 1
+        _, lo, hi, _ = FILTERS[name]
+        if not lo <= len(args) <= hi:
+            want = f"{lo}" if lo == hi else f"{lo}–{hi}"
+            raise ValueError(f"|{name} takes {want} argument(s), got {len(args)}")
+        filters.append((name, args))
+    return filters
+
+
+def split_spec(spec: str) -> tuple[str, list[tuple[str, list[str]]]]:
+    """Split 'spec|f1|f2' into spec and filters.
+
+    A '|' only starts the filter chain if everything after it parses as filters,
+    so shell pipes inside {cmd:...} keep working.
+    """
+    i = spec.find("|")
+    while i >= 0:
+        m = FILTER_NAME_RE.match(spec, i)
+        if m and m[1] in FILTERS:
+            try:
+                return spec[:i], parse_filter_chain(spec[i:])
+            except ValueError:
+                pass
+        i = spec.find("|", i + 1)
+    return spec, []
+
+
+def apply_filters(value: str, filters, timeout: float) -> str:
+    for name, args in filters:
+        func = FILTERS[name][0]
+        value = func(value, *args, timeout=timeout) if name == "sh" else func(value, *args)
+    return value
+
+
 # ---------------------------------------------------------------- templates
 
 
@@ -123,7 +312,15 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT) -> str:
     now = datetime.now().astimezone()
 
     def repl(m: re.Match) -> str:
-        name, offsets, spec = m["name"], m["offsets"], m["spec"]
+        rest = m["rest"] or ""
+        if rest.startswith(":"):
+            spec, filters = split_spec(rest[1:])
+        else:
+            spec, filters = None, parse_filter_chain(rest)
+        return apply_filters(value(m, spec), filters, timeout)
+
+    def value(m: re.Match, spec: str | None) -> str:
+        name, offsets = m["name"], m["offsets"]
         if name in DATE_DEFAULTS:
             return apply_offsets(now, offsets).strftime(spec or DATE_DEFAULTS[name])
         if offsets:
@@ -136,6 +333,8 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT) -> str:
             return os.environ.get(spec or "", "")
         if name == "clipboard":
             return get_clipboard()
+        if name == "input":  # text typed after the abbreviation, else the clipboard
+            return arg or get_clipboard()
         if name == "cmd":
             if not spec:
                 raise ValueError("{cmd:...} needs a command")
@@ -158,7 +357,7 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT) -> str:
 
 
 def uses_arg(template: str) -> bool:
-    return any(m["name"] in ("arg", "cmd") for m in PLACEHOLDER_RE.finditer(template))
+    return any(m["name"] in ("arg", "cmd", "input") for m in PLACEHOLDER_RE.finditer(template))
 
 
 # ---------------------------------------------------------------- config

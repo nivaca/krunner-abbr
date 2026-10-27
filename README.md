@@ -27,7 +27,15 @@ live preview. Saving rewrites the config file and keeps the previous version as
 You can also edit `~/.config/krunner-abbr/abbreviations.toml` directly. Changes apply on
 the next keystroke.
 The example file documents all placeholders: `{date}`, `{now+1d:%A}`, `{arg}`,
-`{uuid}`, `{env:VAR}`, `{clipboard}`, `{cmd:...}`, and others.
+`{uuid}`, `{env:VAR}`, `{clipboard}`, `{input}`, `{cmd:...}`, and others.
+
+Filters transform any placeholder and can be chained, which makes clipboard clean-up
+one keystroke away: copy some text, type `abbr title`, press Enter, and the clipboard
+now holds it in Title Case. Bundled examples: `title`, `lower`, `upper`, `sentence`,
+`join`, `unwrap` (fixes text copied from PDFs) and `slug`. Write your own with filters
+such as `{clipboard|unhyphen|join}`, `{input|replace(" ", "_")}` or
+`{clipboard|sh(sort -u)}`. `{input}` is the text typed after the abbreviation, or the
+clipboard if nothing was typed.
 
 ## Testing from the shell
 

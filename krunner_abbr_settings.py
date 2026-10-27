@@ -40,6 +40,7 @@ PLACEHOLDERS = [
     ("Typed argument with default", "{arg:default}"),
     (None, None),
     ("Clipboard contents", "{clipboard}"),
+    ("Typed argument, else clipboard", "{input}"),
     ("Random UUID", "{uuid}"),
     ("Environment variable", "{env:USER}"),
     ("Shell command output", "{cmd:echo hello}"),
@@ -239,6 +240,14 @@ class SettingsDialog(QDialog):
                 menu.addSeparator()
             else:
                 menu.addAction(f"{label}\t{snippet}", lambda s=snippet: self.insert_placeholder(s))
+        menu.addSeparator()
+        filters = menu.addMenu("Filters")
+        filters.setToolTipsVisible(True)
+        for name, (_, min_args, _, desc) in k.FILTERS.items():
+            # for required arguments, insert the call shown in the description, e.g. "replace(old, new)"
+            call = re.search(rf"\b{name}\([^)]*\)", desc) if min_args else None
+            snippet = "|" + (call[0] if call else name)
+            filters.addAction(f"{desc}\t{snippet}", lambda s=snippet: self.insert_filter(s))
         insert_btn.setMenu(menu)
 
         self.arg_edit = QLineEdit(placeholderText="text typed after the abbreviation")
@@ -474,6 +483,15 @@ class SettingsDialog(QDialog):
     def insert_placeholder(self, snippet: str):
         self.text_edit.insertPlainText(snippet)
         self.text_edit.setFocus()
+
+    def insert_filter(self, snippet: str):
+        """Insert |filter; right after a placeholder, put it inside the closing brace."""
+        cursor = self.text_edit.textCursor()
+        before = self.text_edit.toPlainText()[:cursor.position()]
+        if before.endswith("}") and not before.endswith("}}"):
+            cursor.movePosition(cursor.MoveOperation.Left)
+            self.text_edit.setTextCursor(cursor)
+        self.insert_placeholder(snippet)
 
     def update_preview(self):
         e = self.current()
