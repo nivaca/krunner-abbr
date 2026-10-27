@@ -1,0 +1,62 @@
+# krunner-abbr abbreviations
+# Installed to ~/.config/krunner-abbr/abbreviations.toml; edits are picked up
+# automatically on the next keystroke in KRunner (no restart needed).
+#
+# Type an abbreviation in KRunner, press Enter, and the expansion is copied to
+# the clipboard. Keys are case-insensitive.
+#
+# Placeholders
+#   {date}               today, ISO           2026-10-27
+#   {time}               current time         14:05
+#   {now}                ISO date-time        2026-10-27T14:05:09
+#   {date:%d/%m/%Y}      any strftime format after ':'
+#   {date+1d}            offsets: s m h d w mo(nths) y, chainable: {now+1w-2h:%c}
+#   {arg}                text typed after the abbreviation ("gh nivaca")
+#   {arg:default}        ... with a default when nothing is typed
+#   {uuid}               random UUID4
+#   {env:USER}           environment variable
+#   {clipboard}          current clipboard contents
+#   {cmd:shell command}  stdout of a command (2 s timeout; $ABBR_ARG holds {arg})
+#   {{ and }}            literal braces
+#
+# Values are either a plain string or a table with text / description / icon.
+
+[settings]
+prefix = ""            # e.g. ";" to only react to ";isod"
+min_prefix_chars = 2   # also suggest abbreviations starting with what you typed; 0 = exact only
+
+[abbr]
+# --- dates & times
+isod = "{date}"
+isodt = "{now}"
+isot = "{time}"
+ts = "{now:%Y%m%d-%H%M%S}"
+tmrw = "{date+1d}"
+yday = "{date-1d}"
+nweek = "{date+1w}"
+dmy = "{date:%d/%m/%Y}"
+longd = "{date:%A, %d %B %Y}"
+week = "{date:%G-W%V}"
+epoch = "{now:%s}"
+
+# --- misc dynamic
+uuid = "{uuid}"
+me = "{env:USER}"
+quote = "“{clipboard}”"
+kernel = "{cmd:uname -r}"
+
+# --- with arguments
+gh = "https://github.com/{arg:nivaca}"
+upper = "{cmd:printf %s \"$ABBR_ARG\" | tr a-z A-Z}"
+
+# --- static text (table form with a description)
+[abbr.sig]
+text = """
+Best,
+Nicolas Vaughan"""
+description = "Email signature"
+icon = "mail-signed"
+
+[abbr.mail]
+text = "nivaca@fastmail.com"
+description = "Email address"
