@@ -481,6 +481,13 @@ action = "open"
 group = "Lookup"
 icon = "accessories-dictionary"
 
+[abbr.odf]
+text = "{env:HOME}/.config/krunner-abbr"
+description = "Open the configuration folder"
+action = "open"
+group = "Lookup"
+icon = "folder-open"
+
 [abbr.doi]
 text = "https://doi.org/{input|strip|sub(\"^.*doi\\.org/\", \"\")}"
 description = "Open the article for a DOI"
