@@ -162,7 +162,8 @@ def help_page(cfg) -> str:
       after {cfg.min_prefix_chars or "—"} characters, abbreviations starting with what you
       typed are suggested too.</li>
   <li>{c(typed(cfg if cfg.prefix else _default(cfg), "settings"))} opens the settings dialog,
-      {c(typed(cfg if cfg.prefix else _default(cfg), "help"))} this page and
+      {c(typed(cfg if cfg.prefix else _default(cfg), "help"))}
+      (or {c(typed(cfg if cfg.prefix else _default(cfg), "?"))}) this page and
       {c(typed(cfg if cfg.prefix else _default(cfg), "list"))} the table of abbreviations.</li>
   <li>Abbreviations marked <span class="badge">on Enter</span> run only when you press Enter
       (slow commands, or ones that ask for input in a dialog first); a notification shows

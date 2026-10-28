@@ -28,11 +28,18 @@
 #
 # Filters transform any placeholder and can be chained: {clipboard|unhyphen|join}
 #   upper lower title sentence swapcase   case (title = English title case)
+#   capitalize                             Capitalize Every Word (no title-case rules)
+#   alternating randomcase                 aLtErNaTiNg cAsE, rAnDOm CasE
 #   join  join(", ")                       join lines with a space / a separator
 #   unhyphen                               rejoin words hyphenated across lines (PDFs)
 #   squeeze strip                          collapse runs of spaces / trim
 #   replace(old, new)  sub(regex, repl)    literal / regex replacement
-#   deaccent slug snake camel              café → cafe, url-slug, snake_case, camelCase
+#   deaccent slug                          café → cafe, url-slug
+#   snake kebab camel pascal constant dot  identifier styles; also split camelCase input:
+#                                          parseHTTPResponse → parse_http_response
+#   train ada cobol path flat              Train-Case Ada_Case COBOL-CASE path/case flatcase
+#   space start                            identifier → words: parse http response,
+#                                          Parse HTTP Response
 #   sort  sort(reverse)                    sort lines: natural order, ignoring case and accents
 #   sortitems(", ")                        sort a one-line list: pear, apple → apple, pear
 #   uniq reverse shuffle number            drop duplicates / reverse / shuffle / 1. 2. 3.
@@ -113,6 +120,41 @@ icon = "format-text-uppercase"
 text = "{input|sentence}"
 description = "Clipboard or typed text → Sentence case"
 icon = "format-text-capitalize"
+
+[abbr.caps]
+text = "{input|capitalize}"
+description = "Clipboard or typed text → Capitalize Every Word"
+icon = "format-text-capitalize"
+
+[abbr.swap]
+text = "{input|swapcase}"
+description = "Clipboard or typed text → sWAP cASE"
+icon = "format-text-capitalize"
+
+[abbr.snake]
+text = "{input|snake}"
+description = "Clipboard or typed text → snake_case"
+icon = "format-text-code"
+
+[abbr.kebab]
+text = "{input|kebab}"
+description = "Clipboard or typed text → kebab-case"
+icon = "format-text-code"
+
+[abbr.camel]
+text = "{input|camel}"
+description = "Clipboard or typed text → camelCase"
+icon = "format-text-code"
+
+[abbr.pascal]
+text = "{input|pascal}"
+description = "Clipboard or typed text → PascalCase"
+icon = "format-text-code"
+
+[abbr.const]
+text = "{input|constant}"
+description = "Clipboard or typed text → CONSTANT_CASE"
+icon = "format-text-code"
 
 [abbr.join]
 text = "{input|join}"

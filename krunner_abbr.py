@@ -47,6 +47,8 @@ BUILTINS = {
     "list": ("All Abbreviations", "Open a table of every abbreviation and its expansion",
              "view-list-details"),
 }
+# other words that run a built-in command
+BUILTIN_ALIASES = {"?": "help"}
 BUILTIN_ID = "\x1e"
 
 # KRunner match categories (Plasma 6 QueryMatch::CategoryRelevance)
@@ -165,6 +167,30 @@ def deaccent(text: str) -> str:
 
 def _words(text: str) -> list[str]:
     return re.findall(r"[^\W_]+", deaccent(text))
+
+
+def _ident_words(text: str) -> list[str]:
+    """Words for identifier styles, also splitting camelCase: parseHTTPResponse2 → parse HTTP Response2."""
+    return [p for w in _words(text)
+            for p in re.findall(r"[A-Z]+(?![a-z])\d*|[A-Z]?[a-z]+\d*|\d+[a-z]*|[^\W_]+", w)]
+
+
+def capitalize_words(text: str) -> str:
+    """Capitalize Every Word, without title-case rules for small words."""
+    return re.sub(r"\S+", lambda m: _cap(m[0].lower()), text)
+
+
+def alternating_case(text: str) -> str:
+    """aLtErNaTiNg cAsE, counting letters only so spaces and punctuation don't break the rhythm."""
+    n = 0
+    out = []
+    for c in text:
+        if c.isalpha():
+            out.append(c.upper() if n % 2 else c.lower())
+            n += 1
+        else:
+            out.append(c)
+    return "".join(out)
 
 
 def join_lines(text: str, sep: str = " ") -> str:
@@ -377,6 +403,10 @@ FILTERS = {
     "title": (title_case, 0, 0, "English Title Case"),
     "sentence": (sentence_case, 0, 0, "Sentence case"),
     "swapcase": (str.swapcase, 0, 0, "sWAP cASE"),
+    "capitalize": (capitalize_words, 0, 0, "Capitalize Every Word"),
+    "alternating": (alternating_case, 0, 0, "aLtErNaTiNg cAsE"),
+    "randomcase": (lambda s: "".join(random.choice((c.upper(), c.lower())) for c in s), 0, 0,
+                   "rAnDOm CasE"),
     "join": (join_lines, 0, 1, "join lines with a space, or join(sep)"),
     "unhyphen": (unhyphen, 0, 0, "rejoin words hyphenated across lines"),
     "squeeze": (lambda s: re.sub(r"[ \t ]+", " ", s), 0, 0, "collapse runs of spaces"),
@@ -385,9 +415,21 @@ FILTERS = {
     "sub": (regex_sub, 1, 2, "regex substitution: sub(pattern, repl)"),
     "deaccent": (deaccent, 0, 0, "remove diacritics: café → cafe"),
     "slug": (lambda s: "-".join(_words(s)).lower(), 0, 0, "url-slug"),
-    "snake": (lambda s: "_".join(_words(s)).lower(), 0, 0, "snake_case"),
+    "snake": (lambda s: "_".join(_ident_words(s)).lower(), 0, 0, "snake_case"),
+    "kebab": (lambda s: "-".join(_ident_words(s)).lower(), 0, 0, "kebab-case"),
+    "constant": (lambda s: "_".join(_ident_words(s)).upper(), 0, 0, "CONSTANT_CASE"),
+    "dot": (lambda s: ".".join(_ident_words(s)).lower(), 0, 0, "dot.case"),
     "camel": (lambda s: "".join(w.lower() if i == 0 else w.capitalize()
-                                for i, w in enumerate(_words(s))), 0, 0, "camelCase"),
+                                for i, w in enumerate(_ident_words(s))), 0, 0, "camelCase"),
+    "pascal": (lambda s: "".join(w.capitalize() for w in _ident_words(s)), 0, 0, "PascalCase"),
+    "train": (lambda s: "-".join(w.capitalize() for w in _ident_words(s)), 0, 0, "Train-Case"),
+    "ada": (lambda s: "_".join(w.capitalize() for w in _ident_words(s)), 0, 0, "Ada_Case"),
+    "cobol": (lambda s: "-".join(_ident_words(s)).upper(), 0, 0, "COBOL-CASE"),
+    "path": (lambda s: "/".join(_ident_words(s)).lower(), 0, 0, "path/case"),
+    "flat": (lambda s: "".join(_ident_words(s)).lower(), 0, 0, "flatcase"),
+    "space": (lambda s: " ".join(_ident_words(s)).lower(), 0, 0, "identifier → lowercase words"),
+    "start": (lambda s: " ".join(_cap(w) for w in _ident_words(s)), 0, 0,
+              "identifier → Start Case, keeping acronyms: parseHTTP → Parse HTTP"),
     "sort": (sort_lines, 0, 1, "sort lines: natural order (2 < 10), ignoring case and accents; sort(reverse)"),
     "sortitems": (sort_items, 0, 2, 'sort a one-line list: sortitems(", ") or sortitems(";", reverse)'),
     "uniq": (lambda s: "\n".join(dict.fromkeys(s.splitlines())), 0, 0, "drop duplicate lines"),
@@ -749,6 +791,8 @@ def builtin_matches(cfg: Config, query: str) -> list[tuple[str, int]]:
     if rest is None:
         return []
     rest = rest.lower()
+    if rest in BUILTIN_ALIASES:
+        return [(BUILTIN_ALIASES[rest], HIGHEST)]
     matches = []
     for word in BUILTINS:
         if rest == word:

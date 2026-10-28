@@ -20,7 +20,7 @@ To remove it, run `./uninstall.sh`. Your abbreviations file is kept unless you a
 
 ## Settings
 
-Type `ex help` for a reference page (placeholders, filters, quote styles) or
+Type `ex help` (or `ex ?`) for a reference page (placeholders, filters, quote styles) or
 `ex list` for a searchable table of every abbreviation and its current expansion;
 both open in your browser. Type `ex settings` in KRunner (`<keyword> settings` if you changed the keyword), or
 run `./krunner_abbr_settings.py` (needs PySide6). It sets the trigger keyword, partial-match
@@ -38,10 +38,17 @@ The example file documents all placeholders: `{date}`, `{now+1d:%A}`, `{arg}`,
 Filters transform any placeholder and can be chained, which makes clipboard clean-up
 one keystroke away: copy some text, type `ex title`, press Enter, and the clipboard
 now holds it in Title Case. Bundled examples: `title`, `lower`, `upper`, `sentence`,
+`caps`, `swap`, the identifier styles `snake`, `kebab`, `camel`, `pascal` and `const`,
 `join`, `unwrap` (fixes text copied from PDFs) and `slug`. Write your own with filters
 such as `{clipboard|unhyphen|join}`, `{input|replace(" ", "_")}` or
 `{clipboard|sh(sort -u)}`. `{input}` is the text typed after the abbreviation, or the
 clipboard if nothing was typed.
+
+Case filters: `upper`, `lower`, `title` (English title case), `sentence`, `capitalize`,
+`swapcase`, `alternating` (aLtErNaTiNg) and `randomcase`. Identifier styles split words,
+camelCase included, and drop accents: `snake`, `kebab`, `camel`, `pascal`, `constant`,
+`dot`, `train` (Train-Case), `ada` (Ada_Case), `cobol` (COBOL-CASE), `path`, `flat`,
+`space` (`parseHTTPResponse` → `parse http response`) and `start` (→ `Parse HTTP Response`).
 
 Other bundled examples: LaTeX/Markdown wrappers (`emph`, `cite`, `latex`, `mdlink`,
 `guil`), Latin helpers (`annus`, `roman`, `unroman`, `macrons`), `wc` (word count),
