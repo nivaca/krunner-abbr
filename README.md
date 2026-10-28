@@ -4,6 +4,21 @@ KRunner (Plasma 6) plugin that expands abbreviations. Type the trigger keyword a
 abbreviation in KRunner (`ex isod`), press Enter, and the expansion is copied to the
 clipboard. The keyword alone lists all abbreviations.
 
+Each match also has buttons (or press Tab / the arrow keys to reach them):
+**Copy and paste** pastes the expansion into the window you were in, **Copy the template**
+copies the unexpanded text, and **Edit** opens the abbreviation in the settings dialog.
+Pasting presses Ctrl+V for you, which on Wayland needs `ydotool` (with its service
+running: `sudo dnf install ydotool && sudo systemctl enable --now ydotool`) or `wtype`;
+without one the text is still copied and a notification says why it wasn't pasted.
+Terminals that paste with Ctrl+Shift+V won't receive it.
+
+To make Enter paste as well, set `enter_pastes = true` (or tick "Enter: Paste into the
+previous window" in the settings dialog); the button then becomes **Copy without pasting**.
+
+`ex case Some Text` lists Some Text in every case style (`ex case` alone uses the
+clipboard): UPPER, lower, Title, Sentence, snake_case, camelCase, Train-Case, and the
+rest. Pick one and press Enter to copy it, or use its paste button.
+
 ## Install
 
     ./install.sh
@@ -60,8 +75,9 @@ Other bundled examples: LaTeX/Markdown wrappers (`emph`, `cite`, `latex`, `mdlin
 the answer, which filters and commands can then process: `{ask:DOI|sh(…)}`, or
 `$ABBR_ASK` inside `{cmd:…}`. Examples: `citep`, `letter`, `days`, `askdoi`.
 
-Set `notify = true` (or tick "Show a notification after copying" in the dialog) for a
-desktop notification after every copy.
+A desktop notification confirms every copy. Set `notify = false` (or untick "Show a
+notification after copying" in the dialog) to turn it off; abbreviations computed on
+Enter, and errors, still notify.
 
 Slow abbreviations can set `lazy = true` ("Compute only when Enter is pressed" in the
 dialog): KRunner shows the description instead of a live result, and the expansion runs

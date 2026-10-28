@@ -105,6 +105,7 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
         f"min_prefix_chars = {settings['min_prefix_chars']}",
         f"cmd_timeout = {settings['cmd_timeout']}",
         f"notify = {'true' if settings['notify'] else 'false'}",
+        f"enter_pastes = {'true' if settings['enter_pastes'] else 'false'}",
         "",
         "[abbr]",
     ]
@@ -243,6 +244,15 @@ class SettingsDialog(QDialog):
             "Abbreviations computed on Enter, and errors, always notify, since their "
             "result isn't shown in KRunner."
         ))
+
+        self.enter_pastes_check = QCheckBox("Paste into the previous window")
+        self.enter_pastes_check.toggled.connect(self._general_changed)
+        form.addRow("Enter:", self.enter_pastes_check)
+        form.addRow("", self._hint(
+            "Enter copies the expansion and presses Ctrl+V in the window you came from; "
+            "a button on each match copies without pasting. Needs <code>ydotool</code> "
+            "(with its service running) or <code>wtype</code>; without one, Enter only copies."
+        ))
         return w
 
     def _build_abbr_tab(self) -> QWidget:
@@ -371,7 +381,8 @@ class SettingsDialog(QDialog):
         self.prefix_edit.setText(settings.get("prefix", k.DEFAULT_PREFIX))
         self.min_prefix_spin.setValue(int(settings.get("min_prefix_chars", 2)))
         self.timeout_spin.setValue(float(settings.get("cmd_timeout", k.CMD_TIMEOUT)))
-        self.notify_check.setChecked(bool(settings.get("notify", False)))
+        self.notify_check.setChecked(bool(settings.get("notify", True)))
+        self.enter_pastes_check.setChecked(bool(settings.get("enter_pastes", False)))
         self.list.clear()
         for e in self.entries:
             self.list.addItem(self._make_item(e))
@@ -398,6 +409,14 @@ class SettingsDialog(QDialog):
             return "The trigger keyword cannot contain spaces."
         return None
 
+    def select_key(self, key: str) -> None:
+        """Show abbreviation key (case-insensitive), if it exists."""
+        for row, e in enumerate(self.entries):
+            if e["key"].lower() == key.lower():
+                self.filter_edit.clear()
+                self.list.setCurrentRow(row)
+                return
+
     def _fail(self, row: int, msg: str) -> str:
         self.filter_edit.clear()
         self.list.setCurrentRow(row)
@@ -413,6 +432,7 @@ class SettingsDialog(QDialog):
             "min_prefix_chars": self.min_prefix_spin.value(),
             "cmd_timeout": round(self.timeout_spin.value(), 1),
             "notify": self.notify_check.isChecked(),
+            "enter_pastes": self.enter_pastes_check.isChecked(),
         }
         text = dump_config(settings, self.entries)
         tomllib.loads(text)  # never write a file the runner can't read
@@ -611,6 +631,8 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("krunner-abbr-settings")
     dlg = SettingsDialog()
+    if len(sys.argv) > 1:  # "krunner_abbr_settings.py KEY" opens on that abbreviation
+        dlg.select_key(sys.argv[1])
     dlg.show()
     sys.exit(app.exec())
 

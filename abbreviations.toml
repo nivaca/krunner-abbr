@@ -4,7 +4,10 @@
 #
 # In KRunner type the trigger keyword and an abbreviation ("ex isod"), press
 # Enter, and the expansion is copied to the clipboard. The keyword alone lists all
-# abbreviations; "ex settings" opens the settings dialog. Keys are case-insensitive.
+# abbreviations; "ex settings" opens the settings dialog, "ex help" (or "ex ?") the
+# reference, and "ex case Some Text" lists the text (or the clipboard) in every case
+# style. Each match also has buttons to paste into the previous window, copy the
+# template, or edit the abbreviation. Keys are case-insensitive.
 #
 # Placeholders
 #   {date}               today, ISO           2026-10-27
@@ -68,7 +71,8 @@
 prefix = "ex"          # trigger keyword: type "ex isod"; "" = match abbreviations directly
 min_prefix_chars = 2   # also suggest abbreviations starting with what you typed; 0 = exact only
 cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
-notify = false         # notification after every copy (run-on-Enter results and errors always notify)
+notify = true          # notification after every copy (run-on-Enter results and errors always notify)
+enter_pastes = false   # true: Enter also pastes into the previous window (needs ydotool or wtype)
 
 [abbr]
 # --- dates & times

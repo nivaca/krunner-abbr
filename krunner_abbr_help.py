@@ -165,6 +165,13 @@ def help_page(cfg) -> str:
       {c(typed(cfg if cfg.prefix else _default(cfg), "help"))}
       (or {c(typed(cfg if cfg.prefix else _default(cfg), "?"))}) this page and
       {c(typed(cfg if cfg.prefix else _default(cfg), "list"))} the table of abbreviations.</li>
+  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "case Some Text"))} lists the text in every
+      case style (snake_case, Train-Case, …); with no text, the clipboard.</li>
+  <li>Enter {"copies the expansion and pastes it into the previous window" if cfg.enter_pastes
+      else "copies the expansion"}. Each match has buttons:
+      <b>{"copy without pasting" if cfg.enter_pastes else "copy and paste"}</b>,
+      <b>copy the template</b> unexpanded, and <b>edit</b> the abbreviation in the settings
+      dialog. Pasting needs <code>ydotool</code> or <code>wtype</code> on Wayland.</li>
   <li>Abbreviations marked <span class="badge">on Enter</span> run only when you press Enter
       (slow commands, or ones that ask for input in a dialog first); a notification shows
       what was copied. Cancelling a prompt copies nothing.</li>
@@ -222,7 +229,8 @@ such as {c("«»")} works too.</p>
 <h2>Configuration file</h2>
 <p>{c(str(k.CONFIG_FILE))} is reloaded on the next keystroke after it changes. Under
 {c("[settings]")}: {c("prefix")} (trigger keyword), {c("min_prefix_chars")} (0 turns
-suggestions off) and {c("cmd_timeout")} (seconds). Under {c("[abbr]")}, each abbreviation
+suggestions off), {c("cmd_timeout")} (seconds), {c("notify")} and {c("enter_pastes")}
+(Enter pastes as well as copies). Under {c("[abbr]")}, each abbreviation
 is either {c('key = "text"')} or a table with {c("text")}, {c("description")},
 {c("icon")} and {c("lazy = true")} (run on Enter, with up to
 {k.LAZY_TIMEOUT:.0f}&nbsp;s for commands).</p>

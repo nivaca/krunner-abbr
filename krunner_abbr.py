@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 import unicodedata
 import urllib.parse
@@ -50,6 +51,21 @@ BUILTINS = {
 # other words that run a built-in command
 BUILTIN_ALIASES = {"?": "help"}
 BUILTIN_ID = "\x1e"
+CASE_WORD = "case"  # "<keyword> case [text]" lists every case style of the text or clipboard
+CASE_ID = "\x1d"  # case-picker match ids are "\x1d" + filter + "\x1f" + typed text
+CASE_FILTERS = [
+    "upper", "lower", "title", "sentence", "capitalize", "swapcase", "alternating",
+    "snake", "kebab", "camel", "pascal", "constant", "dot", "train", "ada", "cobol",
+    "path", "flat", "space", "start",
+]
+# buttons on each match: id -> (text, icon)
+ACTIONS = {
+    "paste": ("Copy and paste into the previous window", "edit-paste"),
+    "copy": ("Copy without pasting", "edit-copy"),  # replaces "paste" when Enter pastes
+    "template": ("Copy the template instead of the expansion", "text-x-generic"),
+    "edit": ("Edit this abbreviation", "document-edit"),
+}
+PASTE_DELAY = 0.35  # seconds for KRunner to close and the previous window to get focus
 
 # KRunner match categories (Plasma 6 QueryMatch::CategoryRelevance)
 HIGHEST = 100
@@ -103,6 +119,29 @@ def set_clipboard(text: str) -> None:
             subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True, start_new_session=True).communicate(text)
             return
     raise RuntimeError("no clipboard backend available (Klipper, wl-copy, xclip)")
+
+
+def paste_commands() -> list[list[str]]:
+    """Commands that press Ctrl+V in the focused window, best first."""
+    cmds = [
+        ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],  # evdev codes: Ctrl, V
+        ["wtype", "-M", "ctrl", "v", "-m", "ctrl"],
+    ]
+    if os.environ.get("XDG_SESSION_TYPE") != "wayland":  # on Wayland it reaches only XWayland
+        cmds.append(["xdotool", "key", "--clearmodifiers", "ctrl+v"])
+    return [c for c in cmds if shutil.which(c[0])]
+
+
+def paste_clipboard() -> None:
+    """Press Ctrl+V in the focused window. Raises RuntimeError if no tool can."""
+    errors = []
+    for cmd in paste_commands():
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            return
+        errors.append(f"{cmd[0]}: {(r.stderr or r.stdout).strip() or r.returncode}")
+    raise RuntimeError("; ".join(errors) or
+                       "install ydotool (and enable its service) or wtype to paste automatically")
 
 
 # ---------------------------------------------------------------- filters
@@ -553,9 +592,9 @@ def notify(summary: str, body: str = "", icon: str = "edit-paste") -> None:
         print(f"notification failed: {e}", file=sys.stderr)
 
 
-def notify_copied(abbr: dict, text: str) -> None:
+def notify_copied(abbr: dict, text: str, verb: str = "Copied") -> None:
     body = one_line(text, 300) if text.strip() else abbr.get("description", "")
-    notify(f"Copied “{abbr['key']}”", body, abbr.get("icon", "edit-paste"))
+    notify(f"{verb} “{abbr['key']}”", body, abbr.get("icon", "edit-paste"))
 
 
 # ---------------------------------------------------------------- templates
@@ -737,7 +776,8 @@ class Config:
         self.prefix = DEFAULT_PREFIX
         self.min_prefix_chars = 2
         self.cmd_timeout = CMD_TIMEOUT
-        self.notify = False
+        self.notify = True
+        self.enter_pastes = False
         self.abbrs: dict[str, dict] = {}
         self.error = ""
 
@@ -760,7 +800,8 @@ class Config:
         self.prefix = settings.get("prefix", DEFAULT_PREFIX)
         self.min_prefix_chars = int(settings.get("min_prefix_chars", 2))
         self.cmd_timeout = float(settings.get("cmd_timeout", CMD_TIMEOUT))
-        self.notify = bool(settings.get("notify", False))
+        self.notify = bool(settings.get("notify", True))
+        self.enter_pastes = bool(settings.get("enter_pastes", False))
         abbrs = {}
         for key, val in data.get("abbr", {}).items():
             if isinstance(val, str):
@@ -804,9 +845,29 @@ def builtin_matches(cfg: Config, query: str) -> list[tuple[str, int]]:
     return matches
 
 
+def case_query(cfg: Config, query: str) -> str | None:
+    """The text after "<keyword> case", or None if query isn't a case-picker query."""
+    rest = strip_trigger(query.strip(), cfg.prefix or DEFAULT_PREFIX)
+    if rest is None:
+        return None
+    word, _, text = rest.partition(" ")
+    return text.strip() if word.lower() == CASE_WORD else None
+
+
+def case_variants(text: str) -> list[tuple[str, str]]:
+    """(filter, result) for each case style of text, dropping duplicate results."""
+    seen, out = set(), []
+    for name in CASE_FILTERS:
+        result = FILTERS[name][0](text)
+        if result.strip() and result not in seen:
+            seen.add(result)
+            out.append((name, result))
+    return out
+
+
 def run_builtin(cfg: Config, word: str) -> None:
     if word == SETTINGS_WORD:
-        subprocess.Popen([sys.executable, str(SETTINGS_APP)], start_new_session=True)
+        open_settings()
         return
     import krunner_abbr_help
 
@@ -816,6 +877,12 @@ def run_builtin(cfg: Config, word: str) -> None:
         notify(f"Could not build the {word} page", str(e), "dialog-error")
         return
     subprocess.Popen(["xdg-open", str(path)], start_new_session=True)
+
+
+def open_settings(key: str = "") -> None:
+    """Open the settings dialog, on abbreviation key if given."""
+    subprocess.Popen([sys.executable, str(SETTINGS_APP), *([key] if key else [])],
+                     start_new_session=True)
 
 
 def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
@@ -851,6 +918,10 @@ def one_line(text: str, limit: int) -> str:
 # ---------------------------------------------------------------- D-Bus service
 
 
+def case_icon(name: str) -> str:
+    return "format-text-capitalize" if CASE_FILTERS.index(name) < 7 else "format-text-code"
+
+
 def run_service() -> None:
     import dbus
     import dbus.service
@@ -858,6 +929,17 @@ def run_service() -> None:
     from gi.repository import GLib
 
     cfg = Config(CONFIG_FILE)
+
+    def actions(*ids: str):
+        """Match property listing which ACTIONS buttons a match shows (none if empty).
+
+        "paste" stands for whichever of paste / copy Enter doesn't already do.
+        """
+        alt = "copy" if cfg.enter_pastes else "paste"
+        return dbus.Array([alt if i == "paste" else i for i in ids], signature="s")
+
+    def abbr_actions():
+        return actions("paste", "template", "edit")
 
     class Runner(dbus.service.Object):
         def __init__(self):
@@ -878,8 +960,11 @@ def run_service() -> None:
                 results.append((
                     BUILTIN_ID + word, title, icon, category,
                     1.0 if category == HIGHEST else 0.4,
-                    {"subtext": subtext, "category": "Abbreviations"},
+                    {"subtext": subtext, "category": "Abbreviations", "actions": actions()},
                 ))
+            case_text = case_query(cfg, query)
+            if case_text is not None:
+                results.extend(self.case_results(case_text))
             for abbr, arg, category in find_matches(cfg, query):
                 match_id = f"{abbr['key']}\x1f{arg}"
                 relevance = 1.0 if category == HIGHEST else 0.5
@@ -890,7 +975,8 @@ def run_service() -> None:
                     results.append((
                         match_id, f"{label}: {arg}" if arg else label,
                         abbr.get("icon", "system-run"), category, relevance,
-                        {"subtext": f"{abbr['key']} · {hint}", "category": "Abbreviations"},
+                        {"subtext": f"{abbr['key']} · {hint}", "category": "Abbreviations",
+                         "actions": abbr_actions()},
                     ))
                     continue
                 try:
@@ -898,7 +984,7 @@ def run_service() -> None:
                 except Exception as e:
                     results.append((
                         match_id, f"{abbr['key']}: {e}", "dialog-error", category, 0.1,
-                        {"subtext": "abbreviation error"},
+                        {"subtext": "abbreviation error", "actions": actions("edit")},
                     ))
                     continue
                 self.shown[match_id] = text
@@ -906,26 +992,67 @@ def run_service() -> None:
                     else f"{abbr['key']} → copy to clipboard"
                 results.append((
                     match_id, one_line(text, 200), abbr.get("icon", "edit-paste"), category,
-                    relevance, {"subtext": subtext, "category": "Abbreviations"},
+                    relevance, {"subtext": subtext, "category": "Abbreviations",
+                                "actions": abbr_actions()},
+                ))
+            return results
+
+        def case_results(self, text: str) -> list:
+            """One match per case style of text, or of the clipboard if text is empty."""
+            source = text or get_clipboard()
+            if not source.strip():
+                return [(CASE_ID, "Type some text after “case”, or copy some first",
+                         "format-text-capitalize", HIGHEST, 1.0,
+                         {"subtext": "every case style of the text", "category": "Change case",
+                          "actions": actions()})]
+            results = []
+            for i, (name, result) in enumerate(case_variants(source)):
+                match_id = f"{CASE_ID}{name}\x1f{text}"
+                self.shown[match_id] = result
+                subtext = f"{name} · {FILTERS[name][3]}" + ("" if text else " · from clipboard")
+                results.append((
+                    match_id, one_line(result, 200), case_icon(name), HIGHEST,
+                    1.0 - i * 0.01,  # keep CASE_FILTERS order
+                    {"subtext": subtext, "category": "Change case", "actions": actions("paste")},
                 ))
             return results
 
         @dbus.service.method(IFACE, out_signature="a(sss)")
         def Actions(self):
-            return []
+            return [(action_id, text, icon) for action_id, (text, icon) in ACTIONS.items()]
 
         @dbus.service.method(IFACE, in_signature="ss")
         def Run(self, match_id: str, action_id: str):
             if match_id.startswith(BUILTIN_ID):
                 run_builtin(cfg, match_id[len(BUILTIN_ID):])
                 return
+            # Enter (no action) pastes or copies per the setting; the buttons do the other
+            paste = action_id == "paste" or (not action_id and cfg.enter_pastes)
+            if match_id.startswith(CASE_ID):
+                name, sep, typed = match_id[len(CASE_ID):].partition("\x1f")
+                if not sep or name not in FILTERS:
+                    return  # the "copy some text first" hint
+                text = self.shown.get(match_id)
+                if text is None:  # stale id: recompute
+                    text = FILTERS[name][0](typed or get_clipboard())
+                self.deliver({"key": f"{CASE_WORD} {name}", "icon": case_icon(name)}, text, paste)
+                return
             key, _, arg = match_id.partition("\x1f")
             abbr = cfg.abbrs.get(key.lower())
+            if action_id == "edit":
+                open_settings(abbr["key"] if abbr else key)
+                return
+            if action_id == "template" and abbr is not None:
+                set_clipboard(abbr["text"])
+                if cfg.notify:
+                    notify(f"Copied the template of “{abbr['key']}”", one_line(abbr["text"], 300),
+                           abbr.get("icon", "edit-copy"))
+                return
             text = self.shown.get(match_id)
             if abbr is None and text is None:
                 return
             if abbr is not None and is_lazy(abbr):
-                self.run_lazy(abbr, arg)
+                self.run_lazy(abbr, arg, paste)
                 return
             if text is None:  # stale id: recompute
                 try:
@@ -933,11 +1060,35 @@ def run_service() -> None:
                 except Exception as e:
                     notify(f"“{abbr['key']}” failed", str(e), "dialog-error")
                     return
-            set_clipboard(text)
-            if cfg.notify:
-                notify_copied(abbr or {"key": key}, text)
+            self.deliver(abbr or {"key": key}, text, paste)
 
-        def run_lazy(self, abbr: dict, arg: str):
+        def deliver(self, abbr: dict, text: str, paste: bool, always_notify: bool = False):
+            """Copy text, then paste it into the previous window if asked."""
+            set_clipboard(text)
+            if not paste:
+                if cfg.notify or always_notify:
+                    notify_copied(abbr, text)
+                return
+
+            def work():
+                time.sleep(PASTE_DELAY)
+                try:
+                    paste_clipboard()
+                    error = None
+                except Exception as e:
+                    error = e
+                GLib.idle_add(done, error)
+
+            def done(error):
+                if error is not None:
+                    notify("Copied, but could not paste", str(error), "dialog-warning")
+                elif cfg.notify or always_notify:
+                    notify_copied(abbr, text, "Pasted")
+                return False
+
+            threading.Thread(target=work, daemon=True).start()
+
+        def run_lazy(self, abbr: dict, arg: str, paste: bool = False):
             """Expand in a thread so slow commands don't block KRunner's queries."""
             clipboard = get_clipboard()  # D-Bus calls stay on the main thread
 
@@ -957,9 +1108,8 @@ def run_service() -> None:
                 elif not text.strip():
                     notify(f"“{abbr['key']}” produced no output", "Nothing was copied.",
                            "dialog-warning")
-                else:
-                    set_clipboard(text)
-                    notify_copied(abbr, text)  # always: the result wasn't shown in KRunner
+                else:  # always notify: the result wasn't shown in KRunner
+                    self.deliver(abbr, text, paste, always_notify=True)
                 return False
 
             threading.Thread(target=work, daemon=True).start()
