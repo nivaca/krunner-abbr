@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nicolas Vaughan
 """KRunner D-Bus plugin that expands abbreviations and copies them to the clipboard.
 
 Abbreviations live in ~/.config/krunner-abbr/abbreviations.toml and may contain

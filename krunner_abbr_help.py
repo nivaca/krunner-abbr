@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nicolas Vaughan
 """HTML pages behind "<keyword> help" and "<keyword> list".
 
 Both pages are generated from the code and the current configuration each time they
@@ -59,45 +61,72 @@ FILTER_EXAMPLES = {
     "sh": ("pear\napple", "|sh(sort)"),
 }
 
-# (syntax, description, template whose current expansion is shown, or None)
+# (group, [(syntax, description, template whose current expansion is shown, or None)])
 PLACEHOLDER_DOCS = [
-    ("{date}", "Today, ISO 8601", "{date}"),
-    ("{time}", "Current time", "{time}"),
-    ("{now}", "ISO date and time", "{now}"),
-    ("{date:%d/%m/%Y}", "Any strftime format after the colon", "{date:%d/%m/%Y}"),
-    ("{date+1d}", "Offsets: s m h d w mo y, chainable as in {now+1w-2h}", "{date+1d}"),
-    ("{date@es:%A %d de %B}", "Day and month names in another language (es, es_CO, de, fr…)",
-     "{date@es:%A %d de %B}"),
-    ("{arg}", "Text typed after the abbreviation", None),
-    ("{arg:default}", "… with a default when nothing is typed", None),
-    ("{arg1} {arg2}…", 'Single typed words; the last one used takes the rest. "Quote" words '
-     "to keep spaces: ex cit Cicero Off. 1.3 gives Cicero, Off., 1.3", None),
-    ("{selection}", "The selected (highlighted) text, without copying it", None),
-    ("{clipboard}", "Current clipboard contents", None),
-    ("{clipboard:2}", "An earlier clipboard entry from Klipper's history: 2 = the previous one",
-     None),
-    ("{input}", "Typed text if any, otherwise the clipboard", None),
-    ("{ask:Label}", "Opens an input box when Enter is pressed; {ask:Label=default} pre-fills it",
-     None),
-    ("{asktext:Label}", "Same, with a multi-line box", None),
-    ("{opt:Label}…{/opt}", "A checkbox that keeps or drops the text between the tags; "
-     "{opt:Label=yes} starts ticked. All prompts of an abbreviation share one form", None),
-    ("{cursor}", "Where the cursor ends up after pasting", None),
-    ("{abbr:name}", "Another abbreviation's expansion", None),
-    ("{choose:Label=a, b, c}", "Pick one option from a list when Enter is pressed; quote an "
-     'option to keep a comma: "Dear Sir, Madam"', None),
-    ("{askdate:Label}", "A date picker; gives 2026-10-28, which |datefmt(%d/%m/%Y) reformats",
-     None),
-    ("{random:a, b, c}", "One of the options at random", "{random:heads, tails}"),
-    ("{calc:2*(3+4)}", "Arithmetic: + - * / // % ** ( ), round(x, n), abs(x); also as |calc",
-     "{calc:2*(3+4)}"),
-    ("{uuid}", "Random UUID", "{uuid}"),
-    ("{env:USER}", "Environment variable", "{env:USER}"),
-    ("{cmd:command}", "Output of a shell command; $ABBR_ARG and $ABBR_INPUT hold {arg} and "
-     "{input}, $ABBR_ASK1, $ABBR_ASK2… the answers to prompts ($ABBR_ASK the first)",
-     None),
-    ("{{  }}", "Literal braces: \\emph{{{input}}} gives \\emph{text}", None),
+    ("Dates and times", [
+        ("{date}", "Today, in ISO format.", "{date}"),
+        ("{time}", "The time now, hours and minutes.", "{time}"),
+        ("{now}", "Date and time together, in ISO format.", "{now}"),
+        ("{date:%d/%m/%Y}", "Any strftime format after the colon. %-d gives the day without "
+         "a zero before.", "{date:%d/%m/%Y}"),
+        ("{date+1d}", "With offsets: s seconds, m minutes, h hours, d days, w weeks, mo months, "
+         "y years. They can be combined, like {now+1w-2h}.", "{date+1d}"),
+        ("{date@es:%A %d de %B}", "Names of days and months in another language, also when the "
+         "desktop is in English. Any installed locale: es, es_CO, de, fr, it…",
+         "{date@es:%A %d de %B}"),
+    ]),
+    ("Typed text and clipboard", [
+        ("{arg}", "All the text written after the abbreviation.", None),
+        ("{arg:default}", "The same, with a value for when nothing was written.", None),
+        ("{arg1} {arg2}…", 'Single words of the written text; the last one that is used takes '
+         'all the rest. A word with spaces goes between "double quotes". '
+         "ex cit Cicero Off. 1.3 gives Cicero / Off. / 1.3.", None),
+        ("{clipboard}", "What is on the clipboard now.", None),
+        ("{clipboard:2}", "An older entry of the Klipper history: 2 is the one before the "
+         "current, 3 the one before that, and so on.", None),
+        ("{input}", "The written text if there is some, if not the clipboard. Most of the "
+         "examples that transform text use this one.", None),
+        ("{selection}", "The text that is selected (highlighted) on the screen, without "
+         "copying it before.", None),
+    ]),
+    ("Prompts (they ask when you press Enter)", [
+        ("{ask:Label}", "A line of text. {ask:Label=default} gives a value already written.",
+         None),
+        ("{asktext:Label}", "Several lines of text.", None),
+        ("{choose:Label=a, b, c}", 'A list to choose one option. An option with a comma goes '
+         'between "double quotes".', None),
+        ("{opt:Label}…{/opt}", "A checkbox: if it is ticked, the text between the two tags "
+         "stays, if not it goes away. {opt:Label=yes} starts ticked.", None),
+        ("{askdate:Label}", "A calendar for choosing a date. It gives 2026-10-28; the filter "
+         "datefmt changes the format.", None),
+    ]),
+    ("Other placeholders", [
+        ("{abbr:name}", "The result of another abbreviation, so a signature or a header is in "
+         "only one place. Its prompts go in the same form.", None),
+        ("{cursor}", "Where the cursor ends after pasting. When only copying, it is removed.",
+         None),
+        ("{random:a, b, c}", "One of the options, by chance.", "{random:heads, tails}"),
+        ("{calc:2*(3+4)}", "Arithmetic, like the filter calc.", "{calc:2*(3+4)}"),
+        ("{uuid}", "A random UUID.", "{uuid}"),
+        ("{env:USER}", "An environment variable.", "{env:USER}"),
+        ("{cmd:command}", "What a shell command prints. Inside the command, $ABBR_ARG has "
+         "{arg}, $ABBR_INPUT has {input}, and $ABBR_ASK1, $ABBR_ASK2… the answers to the "
+         "prompts ($ABBR_ASK is the first).", None),
+        ("{{  }}", "Literal braces: \\emph{{{input}}} gives \\emph{text}.", None),
+    ]),
 ]
+
+# filter -> group on the help page; others go to "Other"
+FILTER_GROUPS = {
+    "Case of letters": "upper lower title titulo sentence swapcase capitalize alternating randomcase",
+    "Styles for identifiers": "snake kebab constant dot camel pascal train ada cobol path flat "
+                              "space start",
+    "Cleaning text": "join unhyphen squeeze strip replace sub deaccent slug",
+    "Lines and lists": "sort sortitems uniq reverse shuffle number",
+    "Encodings and numbers": "urlencode urldecode base64 unbase64 latex roman unroman calc datefmt",
+    "Latin": "nomacrons noligatures latinize vtou jtoi",
+    "Quotes": "quotes smartquotes straightquotes",
+}
 
 CSS = """
 :root {
@@ -166,8 +195,8 @@ td.nowrap { white-space: nowrap; }
 .search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .scroll { overflow-x: auto; }
 .toc { display: flex; gap: 6px 14px; flex-wrap: wrap; margin: 18px 0 0; font-size: 14px; }
-.toc a, td a { color: var(--accent); text-decoration: none; }
-.toc a:hover, td a:hover { text-decoration: underline; }
+.toc a, td a, p a, li a { color: var(--accent); text-decoration: none; }
+.toc a:hover, td a:hover, p a:hover, li a:hover { text-decoration: underline; }
 .summary { margin: 18px 0 0; }
 .summary b { font-weight: 650; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
@@ -238,60 +267,100 @@ def safe_expand(template: str, timeout: float, clipboard: str, arg: str = "") ->
 
 def help_page(cfg) -> str:
     c = lambda s: f"<code>{escape(s)}</code>"
-    toc = """<nav class="toc"><a href="#using">Using it</a><a href="#placeholders">Placeholders</a>
-<a href="#filters">Filters</a><a href="#quotes">Quote styles</a><a href="#config">Configuration file</a>
+    t = lambda word: c(typed(cfg, word))  # an abbreviation as typed in KRunner
+    b = lambda word: c(typed(cfg if cfg.prefix else _default(cfg), word))  # a built-in command
+    toc = """<nav class="toc"><a href="#using">First steps</a><a href="#commands">Built-in commands</a>
+<a href="#pasting">Copying and pasting</a><a href="#placeholders">Placeholders</a>
+<a href="#prompts">Prompts</a><a href="#filters">Filters</a><a href="#quotes">Quote styles</a>
+<a href="#config">Configuration</a><a href="#files">Files</a><a href="#problems">Problems</a>
 <a href="list.html">All abbreviations →</a></nav>"""
+    keyword = (f"Your keyword is {c(cfg.prefix)}." if cfg.prefix else
+               "You don't use a keyword, so the abbreviations match directly.")
     usage = toc + f"""
-<h2 id="using">Using it</h2>
+<h2 id="using">First steps</h2>
+<p>Open KRunner (Alt+Space) and write the keyword and an abbreviation, for example
+{t("isod")}. KRunner shows the result already; press <b>Enter</b> and it goes to the
+clipboard. {keyword} The names are not case-sensitive.</p>
 <ul>
-  <li>Type {c(typed(cfg, "isod"))} in KRunner and press <b>Enter</b>: the expansion is copied
-      to the clipboard.</li>
-  <li>Text after the abbreviation becomes its argument: {c(typed(cfg, "upper hello"))}
-      copies <code>HELLO</code>. Clipboard abbreviations work on the clipboard when
-      nothing is typed.</li>
-  <li>{c(typed(cfg, "") if cfg.prefix else "(any abbreviation)")}
-      {"on its own lists every abbreviation;" if cfg.prefix else "matches directly;"}
-      after {cfg.min_prefix_chars or "—"} characters, abbreviations starting with what you
-      typed are suggested too.</li>
-  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "settings"))} opens the settings dialog,
-      {c(typed(cfg if cfg.prefix else _default(cfg), "help"))}
-      (or {c(typed(cfg if cfg.prefix else _default(cfg), "?"))}) this page and
-      {c(typed(cfg if cfg.prefix else _default(cfg), "list"))} the table of abbreviations.</li>
-  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "case Some Text"))} lists the text in every
-      case style (snake_case, Train-Case, …); with no text, the clipboard.</li>
-  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "clip"))} lists the clipboard history
-      (add text to search it); Enter copies the entry again.</li>
-  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "|unhyphen|join"))} applies any chain of
-      the filters below to the text typed after it or the clipboard; a partly typed name
-      lists the filters it could become. Chains with {c("sh(…)")} run only on Enter.</li>
-  <li>Enter {"copies the expansion and pastes it into the previous window" if cfg.enter_pastes
-      else "copies the expansion"}. Each match has buttons:
+  <li>{t("") if cfg.prefix else "Any abbreviation"} {"alone shows the list of all your abbreviations, with their result." if cfg.prefix else "is found directly, without anything before it."}</li>
+  <li>After {cfg.min_prefix_chars or "—"} letters, also the abbreviations that start with them are
+      suggested, below the exact one{"" if cfg.min_prefix_chars else " (this is turned off now)"}.
+      From 3 letters, the words of the descriptions and the keywords are searched too, a bit lower.</li>
+  <li>The text after the abbreviation is its argument: {t("upper hello")} gives
+      <code>HELLO</code>. When you don't write anything, most of them take the clipboard.</li>
+  <li>Every result has buttons (with the mouse, or Tab and the arrow keys):
       <b>{"copy without pasting" if cfg.enter_pastes else "copy and paste"}</b>,
-      <b>copy the template</b> unexpanded, and <b>edit</b> the abbreviation in the settings
-      dialog. Pasting needs <code>ydotool</code> or <code>wtype</code> on Wayland.</li>
-  <li>Abbreviations marked <span class="badge">on Enter</span> run only when you press Enter
-      (slow commands, or ones that ask for input in a dialog first); a notification shows
-      what was copied. Cancelling a prompt copies nothing.</li>
+      <b>copy the template</b> (without expanding it) and <b>edit this abbreviation</b>.</li>
+  <li>The abbreviations marked <span class="badge">on Enter</span> are computed only when you
+      press Enter: slow commands, or the ones that ask you something. A notification shows
+      what was copied, and if you cancel the questions nothing is copied.</li>
+  <li>After each copy a small notification shows the text{"" if cfg.notify else " (turned off now, except for errors and the results computed on Enter)"}.</li>
 </ul>
-<p class="muted">Trigger keyword: {c(cfg.prefix) if cfg.prefix else "none"} ·
-Configuration: {c(str(k.CONFIG_FILE))}</p>
+
+<h2 id="commands">Built-in commands</h2>
+<p>These work always, also if you don't use a keyword.</p>
+<div class="scroll"><table>
+<tr><th>You write</th><th>What happens</th></tr>
+<tr><td class=nowrap>{b("settings")}</td><td>Opens the settings dialog.</td></tr>
+<tr><td class=nowrap>{b("help")}, {b("?")}</td><td>Opens this page.</td></tr>
+<tr><td class=nowrap>{b("list")}</td><td>Opens the <a href="list.html">page with all your abbreviations</a>, their template and their result now.</td></tr>
+<tr><td class=nowrap>{b("case Some Text")}</td><td>Shows the text in every case style: UPPER, lower, Title, Sentence, snake_case, camelCase, Train-Case and the others. Without text, it uses the clipboard.</td></tr>
+<tr><td class=nowrap>{b("clip")}, {b("clip word")}</td><td>The clipboard history from Klipper (up to {k.CLIP_MAX} entries), or only the entries with this word, without caring about upper case or accents. Enter copies the old entry again.</td></tr>
+<tr><td class=nowrap>{b("|unhyphen|join text")}</td><td>Applies any chain of <a href="#filters">filters</a> to the text, or to the clipboard when there is no text. If the last name is not complete, all the filters that start like that are shown, each one with its result. A chain with {c("sh(…)")} runs only on Enter, never while you write.</td></tr>
+</table></div>
+
+<h2 id="pasting">Copying and pasting</h2>
+<p>Now, Enter <b>{"copies and pastes" if cfg.enter_pastes else "copies"}</b> the result
+({c("enter_pastes = " + ("true" if cfg.enter_pastes else "false"))}). For pasting, the
+runner presses Ctrl+V for you in the window where you were before KRunner. On Wayland this
+needs {c("ydotool")} with its service running
+({c("sudo dnf install ydotool && sudo systemctl enable --now ydotool")}); {c("wtype")} works
+in some compositors but normally not in KWin. If nothing can paste, the text stays on the
+clipboard and a notification says why.</p>
+<p>Terminals paste with Ctrl+Shift+V. Before pasting, the runner asks KWin which window has
+the focus, and uses Ctrl+Shift+V for the terminals that it knows (Konsole, Yakuake, kitty,
+Alacritty, foot, WezTerm, Ghostty, GNOME Terminal, Ptyxis, Tilix, xterm and some more). Other programs go in a
+{c("[paste_keys]")} table, with their window class or desktop file name:
+{c('"org.example.app" = "shift+insert"')}. The keys can be {c("ctrl+v")},
+{c("ctrl+shift+v")} or {c("shift+insert")}.</p>
+<p>With {c("{cursor}")} in the template you decide where the cursor stays after pasting:
+{c(r"\emph{{{cursor}}}")} leaves it between the braces.</p>
 """
-    rows = []
-    for syntax, desc, example in PLACEHOLDER_DOCS:
-        now = ""
-        if example:
-            result, ok = safe_expand(example, cfg.cmd_timeout, "")
-            now = f'<span class="result{"" if ok else " error"}">{escape(result)}</span>'
-        rows.append(f"<tr><td class=nowrap>{c(syntax)}</td><td>{escape(desc)}</td>"
-                    f"<td>{now}</td></tr>")
+    sections = []
+    for group, docs in PLACEHOLDER_DOCS:
+        rows = []
+        for syntax, desc, example in docs:
+            now = ""
+            if example:
+                result, ok = safe_expand(example, cfg.cmd_timeout, "")
+                now = f'<span class="result{"" if ok else " error"}">{escape(result)}</span>'
+            rows.append(f"<tr><td class=nowrap>{c(syntax)}</td><td>{escape(desc)}</td>"
+                        f"<td>{now}</td></tr>")
+        sections.append(f'<tr class=group><td colspan=3>{escape(group)}</td></tr>{"".join(rows)}')
     placeholders = f"""
 <h2 id="placeholders">Placeholders</h2>
+<p>A placeholder is a word between braces that is replaced when the abbreviation expands.
+Every placeholder can be followed by <a href="#filters">filters</a>, like
+{c("{clipboard|upper}")}. A placeholder cannot have {c("{")} or {c("}")} inside; if a
+command needs them, put the command in a small script.</p>
 <div class="scroll"><table>
-<tr><th>Placeholder</th><th>Meaning</th><th>Right now</th></tr>
-{"".join(rows)}
+<tr><th>Placeholder</th><th>What it gives</th><th>Right now</th></tr>
+{"".join(sections)}
 </table></div>
+
+<h2 id="prompts">Prompts and the form</h2>
+<p>When an abbreviation has prompts ({c("{ask}")}, {c("{asktext}")}, {c("{choose}")},
+{c("{opt}")}, {c("{askdate}")}), KRunner shows its description instead of the result, and the
+questions come when you press Enter, all together in one small window (without PySide6,
+{c("kdialog")} asks them one after the other). If you cancel, nothing is copied.</p>
+<p>The same label is asked only once, also when it is used several times, and the prompts of
+an abbreviation included with {c("{abbr:…}")} go in the same form. The answers can pass
+through filters ({c("{ask:Title|titulo}")}), and the shell commands receive them in
+{c("$ABBR_ASK1")}, {c("$ABBR_ASK2")}… For a question that is only for a command, the filter
+{c("silent")} keeps it out of the result.</p>
 """
-    rows = []
+    group_of = {name: group for group, names in FILTER_GROUPS.items() for name in names.split()}
+    by_group: dict[str, list[str]] = {}
     for name, (_, lo, hi, desc) in k.FILTERS.items():
         call = name if hi == 0 else f"{name}(…)" if lo else f"{name}, {name}(…)"
         example = FILTER_EXAMPLES.get(name) or (None if lo else (FILTER_SAMPLE, f"|{name}"))
@@ -304,18 +373,24 @@ Configuration: {c(str(k.CONFIG_FILE))}</p>
                 result, ok = str(e), False
             shown = (f"{c(chain)}<span class=sub><span class=result>{escape(source)}</span> → "
                      f'<span class="result{"" if ok else " error"}">{escape(result)}</span></span>')
-        rows.append(f"<tr id=f-{name}><td class=nowrap>{c('|' + call)}</td><td>{escape(desc)}</td>"
-                    f"<td>{shown}</td></tr>")
+        by_group.setdefault(group_of.get(name, "Counting and others"), []).append(
+            f"<tr id=f-{name}><td class=nowrap>{c('|' + call)}</td><td>{escape(desc)}</td>"
+            f"<td>{shown}</td></tr>")
+    order = [*FILTER_GROUPS, "Counting and others"]
+    rows = "".join(f'<tr class=group><td colspan=3>{escape(g)}</td></tr>{"".join(by_group[g])}'
+                   for g in order if g in by_group)
     filters = f"""
 <h2 id="filters">Filters</h2>
-<p>Filters transform any placeholder and can be chained, left to right:
-{c("{clipboard|unhyphen|join}")}, {c("{date:%Y|roman}")}.
-Quote arguments that contain spaces or commas: {c('replace(" ", "_")')}.
-Inside {c("{cmd:…}")}, write shell pipes with spaces ({c("a | sort")}) so they are not
-read as filters. Placeholders cannot contain {c("{")} or {c("}")}.</p>
+<p>Filters change the value of a placeholder. They go after it with {c("|")} and can be
+chained, from left to right: {c("{clipboard|unhyphen|join}")}, {c("{date:%Y|roman}")}.
+Some take arguments between parentheses; an argument with spaces or commas goes between
+double quotes, like {c('replace(" ", "_")')}. Inside {c("{cmd:…}")} write the shell pipes
+with spaces ({c("a | sort")}), so they are not taken as filters. In KRunner you can use
+them also without an abbreviation: {b("|upper|join some text")}.</p>
+<p>The examples in the last column are computed now, with the real code.</p>
 <div class="scroll"><table>
-<tr><th>Filter</th><th>Effect</th><th>Example</th></tr>
-{"".join(rows)}
+<tr><th>Filter</th><th>What it does</th><th>Example</th></tr>
+{rows}
 </table></div>
 """
     rows = []
@@ -324,34 +399,92 @@ read as filters. Placeholders cannot contain {c("{")} or {c("}")}.</p>
                     f"<td class=result>{escape(opener)}text{escape(closer)}</td></tr>")
     quotes = f"""
 <h2 id="quotes">Quote styles</h2>
-<p>For {c("|quotes(from, to)")}. Give several pairs to convert them in one pass, which keeps
-nested quotes right: {c("quotes(guillemets, double, double, single)")} turns
-<span class=result>«a “b” c»</span> into <span class=result>“a ‘b’ c”</span>. A literal pair
-such as {c("«»")} works too.</p>
+<p>For {c("|quotes(from, to)")}. A pair written directly, like {c("«»")}, works too. With
+several pairs, all of them are converted in one pass, and this is important for nested quotes:
+{c("quotes(guillemets, double, double, single)")} converts
+<span class=result>«a “b” c»</span> into <span class=result>“a ‘b’ c”</span>, without
+converting the new double quotes again.</p>
 <div class="scroll"><table>
 <tr><th>Style</th><th>Example</th></tr>
 {"".join(rows)}
 </table></div>
 """
+    yes = lambda v: "true" if v else "false"
+    settings_rows = [
+        ("prefix", c(cfg.prefix) if cfg.prefix else c('""'), "The keyword before the abbreviations. "
+         "A word needs a space after it, a symbol (like ;) does not. Empty means no keyword."),
+        ("min_prefix_chars", c(str(cfg.min_prefix_chars)), "After how many letters the "
+         "abbreviations that start with them are suggested. 0 means only exact names."),
+        ("cmd_timeout", c(str(cfg.cmd_timeout)), "Seconds that a command can take while you "
+         f"write (they run on each key). On Enter they can take up to {k.LAZY_TIMEOUT:.0f}."),
+        ("notify", c(yes(cfg.notify)), "A notification after every copy."),
+        ("enter_pastes", c(yes(cfg.enter_pastes)), "Enter copies and also pastes."),
+        ("rank_by_use", c(yes(cfg.rank_by_use)), "The abbreviations you use more, and more "
+         "recently, come first. A use of a month ago counts half."),
+        ("disabled_groups", c(str(cfg.disabled_groups).replace("'", '"')), "Groups that are not "
+         "offered in KRunner. They can still be included with {abbr:…}."),
+    ]
+    field_rows = [
+        ("text", "The template, with placeholders. The only required field."),
+        ("description", "Shown under the result in KRunner, and searched from 3 letters."),
+        ("icon", "Name of an icon of the theme, like edit-paste or accessories-dictionary."),
+        ("lazy", "true: computed only on Enter, for slow things like downloads."),
+        ("keywords", 'Other words that find it: keywords = "fecha hoy", or a list.'),
+        ("aliases", 'Other names: aliases = ["today", "hoy"]. A real name always wins.'),
+        ("group", "Heading in KRunner and section in the list page; groups can be disabled."),
+        ("format", '"markdown" or "html": copied as formatted text (in terminals, plain). '
+         "On Wayland the HTML is offered also to plain-text programs, so there you see the tags."),
+        ("action", '"open": Enter opens the result (web page, file or folder) instead of copying it.'),
+        ("when", "A regular expression: when the clipboard matches, the bare keyword shows this "
+         "abbreviation first."),
+        ("propagate_case", "true: Sig gives the result Capitalized, SIG in UPPERCASE."),
+    ]
     config = f"""
 <h2 id="config">Configuration file</h2>
-<p>{c(str(k.CONFIG_FILE))} is reloaded on the next keystroke after it changes. Under
-{c("[settings]")}: {c("prefix")} (trigger keyword), {c("min_prefix_chars")} (0 turns
-suggestions off), {c("cmd_timeout")} (seconds), {c("notify")} and {c("enter_pastes")}
-(Enter pastes as well as copies). Under {c("[abbr]")}, each abbreviation
-is either {c('key = "text"')} or a table with {c("text")}, {c("description")},
-{c("icon")}, {c("lazy = true")} (run on Enter, with up to
-{k.LAZY_TIMEOUT:.0f}&nbsp;s for commands), {c("keywords")} (extra words that find it) and
-{c('format = "markdown"')} or {c('"html"')} (copied as formatted text, plain in terminals),
-{c('aliases = ["fh", "hoy"]')} (other names), {c('group = "LaTeX"')} (KRunner category and list
-section), {c('action = "open"')} (Enter opens the expansion, a link, file or folder, instead of
-copying it), {c('when = "regex"')} (listed first under the bare keyword while the clipboard
-matches) and {c("propagate_case = true")} (Sig → Capitalized, SIG → UPPERCASE).
-{c("rank_by_use")} under {c("[settings]")} ranks frequent and recent abbreviations higher
-(usage is kept in {c(str(k.USAGE_FILE))}); {c('disabled_groups = ["LaTeX"]')} hides groups.
-{c("[paste_keys]")} maps applications to the keys that paste in them, e.g.
-{c('"org.example.app" = "shift+insert"')}; terminals already use Ctrl+Shift+V.
-{c("--import-espanso FILE")} converts espanso match files.</p>
+<p>Everything is in {c(str(k.CONFIG_FILE))}, in TOML format. It is read again by itself after
+each change, from the next key you press in KRunner. If it has an error, the last good version
+stays in use. You can edit it by hand or with {b("settings")}; the dialog writes the whole file
+again (and keeps the old one as {c("abbreviations.toml.bak")}), so the comments that you wrote
+by hand are lost.</p>
+<p>Under {c("[settings]")} (the second column is your value now):</p>
+<div class="scroll"><table>
+<tr><th>Setting</th><th>Now</th><th>Meaning</th></tr>
+{"".join(f"<tr><td class=nowrap>{c(n)}</td><td class=nowrap>{v}</td><td>{escape(d)}</td></tr>" for n, v, d in settings_rows)}
+</table></div>
+<p>Under {c("[abbr]")}, each abbreviation is a simple line, {c('em = "—"')}, or a table
+({c("[abbr.name]")}) with these fields. The simple lines must come before the tables.
+Long texts can use {c('"""…"""')}, or {c("\'\'\'…\'\'\'")} without escapes, which is practical
+for LaTeX.</p>
+<div class="scroll"><table>
+<tr><th>Field</th><th>Meaning</th></tr>
+{"".join(f"<tr><td class=nowrap>{c(n)}</td><td>{escape(d)}</td></tr>" for n, d in field_rows)}
+</table></div>
+<p>To bring abbreviations from espanso: {c("./krunner_abbr.py --import-espanso FILE")} shows
+them converted, and with {c("--write")} they are added to your file.</p>
+
+<h2 id="files">Files</h2>
+<div class="scroll"><table>
+<tr><th>File</th><th>What</th></tr>
+<tr><td>{c(str(k.CONFIG_FILE))}</td><td>Your abbreviations and settings.</td></tr>
+<tr><td>{c(str(k.USAGE_FILE))}</td><td>How many times and when you used each abbreviation.</td></tr>
+<tr><td>{c(str(CACHE_DIR))}</td><td>This page, the list page, and a small KWin script for knowing the active window.</td></tr>
+</table></div>
+
+<h2 id="problems">Problems</h2>
+<ul>
+  <li><b>Nothing is pasted.</b> Check that {c("ydotool")} is installed and that its service is
+      running ({c("systemctl status ydotool")}). The notification says what failed.</li>
+  <li><b>In a terminal the paste does nothing.</b> Probably the terminal is not known; add it to
+      {c("[paste_keys]")} with {c("ctrl+shift+v")}.</li>
+  <li><b>HTML tags appear when pasting.</b> This is the limit of formatted text on Wayland,
+      explained in the {c("format")} field.</li>
+  <li><b>{c("{selection}")} gives the old text of KRunner.</b> KRunner can select the previous
+      search when it opens. Select your text again, or tell KRunner to not keep the last search.</li>
+  <li><b>An abbreviation is slow.</b> Its commands run on every key, with a limit of
+      {cfg.cmd_timeout} seconds. Put {c("lazy = true")} for slow ones.</li>
+  <li><b>A change in the code has no effect.</b> Stop the runner with
+      {c("pkill -f krunner_abbr.py")}; it starts again on the next query.</li>
+</ul>
 """
     return page("Abbreviations Help", "help", usage + placeholders + filters + quotes + config)
 

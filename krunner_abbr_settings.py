@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nicolas Vaughan
 """Settings dialog for krunner-abbr: trigger keyword, matching options and abbreviations.
 
 Writes ~/.config/krunner-abbr/abbreviations.toml, which the runner reloads on the

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nicolas Vaughan
 """Convert espanso match files (YAML) into krunner-abbr abbreviations.
 
     krunner_abbr.py --import-espanso base.yml            print the TOML

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nicolas Vaughan
 """One dialog for all the prompts of an abbreviation: {ask}, {asktext}, {choose}, {opt}
 and {askdate}.
 

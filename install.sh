@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nicolas Vaughan
 # Install krunner-abbr as a D-Bus-activated KRunner plugin for the current user.
 set -euo pipefail
 
