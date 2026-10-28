@@ -21,13 +21,23 @@ PLACEHOLDER_DOCS = [
     ("{now}", "ISO date and time", "{now}"),
     ("{date:%d/%m/%Y}", "Any strftime format after the colon", "{date:%d/%m/%Y}"),
     ("{date+1d}", "Offsets: s m h d w mo y, chainable as in {now+1w-2h}", "{date+1d}"),
+    ("{date@es:%A %d de %B}", "Day and month names in another language (es, es_CO, de, fr…)",
+     "{date@es:%A %d de %B}"),
     ("{arg}", "Text typed after the abbreviation", None),
     ("{arg:default}", "… with a default when nothing is typed", None),
     ("{clipboard}", "Current clipboard contents", None),
+    ("{clipboard:2}", "An earlier clipboard entry from Klipper's history: 2 = the previous one",
+     None),
     ("{input}", "Typed text if any, otherwise the clipboard", None),
     ("{ask:Label}", "Opens an input box when Enter is pressed; {ask:Label=default} pre-fills it",
      None),
     ("{asktext:Label}", "Same, with a multi-line box", None),
+    ("{opt:Label}…{/opt}", "A checkbox that keeps or drops the text between the tags; "
+     "{opt:Label=yes} starts ticked. All prompts of an abbreviation share one form", None),
+    ("{cursor}", "Where the cursor ends up after pasting", None),
+    ("{abbr:name}", "Another abbreviation's expansion", None),
+    ("{choose:Label=a, b, c}", "Pick one option from a list when Enter is pressed; quote an "
+     'option to keep a comma: "Dear Sir, Madam"', None),
     ("{uuid}", "Random UUID", "{uuid}"),
     ("{env:USER}", "Environment variable", "{env:USER}"),
     ("{cmd:command}", "Output of a shell command; $ABBR_ARG and $ABBR_INPUT hold {arg} and "
@@ -167,6 +177,11 @@ def help_page(cfg) -> str:
       {c(typed(cfg if cfg.prefix else _default(cfg), "list"))} the table of abbreviations.</li>
   <li>{c(typed(cfg if cfg.prefix else _default(cfg), "case Some Text"))} lists the text in every
       case style (snake_case, Train-Case, …); with no text, the clipboard.</li>
+  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "clip"))} lists the clipboard history
+      (add text to search it); Enter copies the entry again.</li>
+  <li>{c(typed(cfg if cfg.prefix else _default(cfg), "|unhyphen|join"))} applies any chain of
+      the filters below to the text typed after it or the clipboard; a partly typed name
+      lists the filters it could become. Chains with {c("sh(…)")} run only on Enter.</li>
   <li>Enter {"copies the expansion and pastes it into the previous window" if cfg.enter_pastes
       else "copies the expansion"}. Each match has buttons:
       <b>{"copy without pasting" if cfg.enter_pastes else "copy and paste"}</b>,
@@ -232,8 +247,12 @@ such as {c("«»")} works too.</p>
 suggestions off), {c("cmd_timeout")} (seconds), {c("notify")} and {c("enter_pastes")}
 (Enter pastes as well as copies). Under {c("[abbr]")}, each abbreviation
 is either {c('key = "text"')} or a table with {c("text")}, {c("description")},
-{c("icon")} and {c("lazy = true")} (run on Enter, with up to
-{k.LAZY_TIMEOUT:.0f}&nbsp;s for commands).</p>
+{c("icon")}, {c("lazy = true")} (run on Enter, with up to
+{k.LAZY_TIMEOUT:.0f}&nbsp;s for commands), {c("keywords")} (extra words that find it) and
+{c('format = "markdown"')} or {c('"html"')} (copied as formatted text, plain in terminals).
+{c("[paste_keys]")} maps applications to the keys that paste in them, e.g.
+{c('"org.example.app" = "shift+insert"')}; terminals already use Ctrl+Shift+V.
+{c("--import-espanso FILE")} converts espanso match files.</p>
 """
     return page("Abbreviations Help", "help", usage + placeholders + filters + quotes + config)
 

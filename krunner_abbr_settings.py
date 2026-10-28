@@ -17,16 +17,16 @@ import tomllib
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
     QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
     QStyleOptionViewItem, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 import krunner_abbr as k
+from krunner_abbr_form import run_form
 
 KEY_RE = re.compile(r"^\S+$")
-BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # (label, text inserted at the cursor)
 PLACEHOLDERS = [
@@ -35,15 +35,21 @@ PLACEHOLDERS = [
     ("Date and time (ISO)", "{now}"),
     ("Custom date format", "{date:%d/%m/%Y}"),
     ("Tomorrow", "{date+1d}"),
+    ("Date in Spanish", "{date@es:%A %d de %B de %Y}"),
     ("Next month", "{date+1mo}"),
     (None, None),
     ("Typed argument", "{arg}"),
     ("Typed argument with default", "{arg:default}"),
     (None, None),
     ("Clipboard contents", "{clipboard}"),
+    ("Previous clipboard entry", "{clipboard:2}"),
     ("Typed argument, else clipboard", "{input}"),
     ("Ask for input (dialog)", "{ask:Label}"),
     ("Ask for multi-line text (dialog)", "{asktext:Label}"),
+    ("Choose from a list (dialog)", "{choose:Label=one, two, three}"),
+    ("Optional section (checkbox)", "{opt:Label}text{/opt}"),
+    ("Cursor position after pasting", "{cursor}"),
+    ("Another abbreviation", "{abbr:name}"),
     ("Random UUID", "{uuid}"),
     ("Environment variable", "{env:USER}"),
     ("Shell command output", "{cmd:echo hello}"),
@@ -59,6 +65,7 @@ PLACEHOLDERS = [
 def load_config(path) -> tuple[dict, list[dict]]:
     data = tomllib.loads(path.read_text())
     settings = data.get("settings", {})
+    settings["paste_keys"] = data.get("paste_keys", {})
     entries = []
     for key, val in data.get("abbr", {}).items():
         if isinstance(val, str):
@@ -69,18 +76,13 @@ def load_config(path) -> tuple[dict, list[dict]]:
             "description": val.get("description", ""),
             "icon": val.get("icon", ""),
             "lazy": bool(val.get("lazy", False)),
+            "keywords": val.get("keywords", ""),
+            "format": val.get("format", ""),
         })
     return settings, entries
 
 
-def toml_str(s: str) -> str:
-    if "\n" in s and "'''" not in s and "\r" not in s:
-        return "'''\n" + s + "'''"  # literal multi-line: no escaping needed
-    return json.dumps(s, ensure_ascii=False)  # JSON strings are valid TOML basic strings
-
-
-def toml_key(key: str) -> str:
-    return key if BARE_KEY_RE.match(key) else json.dumps(key, ensure_ascii=False)
+toml_str, toml_key = k.toml_str, k.toml_key
 
 
 def doc_header() -> list[str]:
@@ -106,12 +108,15 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
         f"cmd_timeout = {settings['cmd_timeout']}",
         f"notify = {'true' if settings['notify'] else 'false'}",
         f"enter_pastes = {'true' if settings['enter_pastes'] else 'false'}",
-        "",
-        "[abbr]",
     ]
+    if settings.get("paste_keys"):
+        out += ["", "[paste_keys]"]
+        out += [f"{toml_key(app)} = {toml_str(keys)}" for app, keys in settings["paste_keys"].items()]
+    out += ["", "[abbr]"]
     # plain key = value pairs must precede sub-tables in TOML
-    simple = [e for e in entries if not (e["description"] or e["icon"] or e["lazy"])]
-    tables = [e for e in entries if e["description"] or e["icon"] or e["lazy"]]
+    extras = ("description", "icon", "lazy", "keywords", "format")
+    simple = [e for e in entries if not any(e.get(f) for f in extras)]
+    tables = [e for e in entries if any(e.get(f) for f in extras)]
     out += [f"{toml_key(e['key'])} = {toml_str(e['text'])}" for e in simple]
     for e in tables:
         out += ["", f"[abbr.{toml_key(e['key'])}]", f"text = {toml_str(e['text'])}"]
@@ -121,6 +126,10 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
             out.append(f"icon = {toml_str(e['icon'])}")
         if e["lazy"]:
             out.append("lazy = true")
+        if e.get("keywords"):
+            out.append(f"keywords = {toml_str(e['keywords'])}")
+        if e.get("format"):
+            out.append(f"format = {toml_str(e['format'])}")
     return "\n".join(out) + "\n"
 
 
@@ -287,6 +296,14 @@ class SettingsDialog(QDialog):
         # right: editor
         self.key_edit = QLineEdit()
         self.desc_edit = QLineEdit(placeholderText="optional, shown under the result")
+        self.keywords_edit = QLineEdit(placeholderText="optional words that also find it, e.g. fecha hoy")
+        self.format_combo = QComboBox()
+        for label, value in (("Plain text", ""), ("Markdown → formatted text", "markdown"),
+                             ("HTML → formatted text", "html")):
+            self.format_combo.addItem(label, value)
+        self.format_combo.setToolTip(
+            "Formatted abbreviations are copied as rich text (bold, italics, links, lists) "
+            "for mail, office and web editors; terminals get the plain text when pasting.")
         self.icon_edit = QLineEdit(placeholderText="edit-paste")
         self.icon_preview = QLabel()
         icon_row = QHBoxLayout()
@@ -322,6 +339,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(self.editor)
         form.addRow("Abbreviation:", self.key_edit)
         form.addRow("Description:", self.desc_edit)
+        form.addRow("Keywords:", self.keywords_edit)
         form.addRow("Icon:", icon_row)
         self.lazy_check = QCheckBox("Compute only when Enter is pressed")
         self.lazy_check.setToolTip(
@@ -330,6 +348,7 @@ class SettingsDialog(QDialog):
             f"Enter. Commands may then run for up to {k.LAZY_TIMEOUT:.0f} s."
         )
         form.addRow("", self.lazy_check)
+        form.addRow("Format:", self.format_combo)
         text_label = QWidget()
         tl = QVBoxLayout(text_label)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -352,6 +371,8 @@ class SettingsDialog(QDialog):
         self.desc_edit.textChanged.connect(self._entry_changed)
         self.icon_edit.textChanged.connect(self._entry_changed)
         self.lazy_check.toggled.connect(self._entry_changed)
+        self.keywords_edit.textChanged.connect(self._entry_changed)
+        self.format_combo.currentIndexChanged.connect(self._entry_changed)
         self.text_edit.textChanged.connect(self._entry_changed)
         self.arg_edit.textChanged.connect(lambda: self.preview_timer.start())
 
@@ -377,6 +398,7 @@ class SettingsDialog(QDialog):
         except (OSError, tomllib.TOMLDecodeError) as e:
             QMessageBox.critical(self, "Cannot read configuration", f"{src}\n\n{e}")
             settings, self.entries = {}, []
+        self.paste_keys = settings.get("paste_keys", {})  # no editor: kept as loaded
         self.loading = True
         self.prefix_edit.setText(settings.get("prefix", k.DEFAULT_PREFIX))
         self.min_prefix_spin.setValue(int(settings.get("min_prefix_chars", 2)))
@@ -433,6 +455,7 @@ class SettingsDialog(QDialog):
             "cmd_timeout": round(self.timeout_spin.value(), 1),
             "notify": self.notify_check.isChecked(),
             "enter_pastes": self.enter_pastes_check.isChecked(),
+            "paste_keys": self.paste_keys,
         }
         text = dump_config(settings, self.entries)
         tomllib.loads(text)  # never write a file the runner can't read
@@ -514,6 +537,8 @@ class SettingsDialog(QDialog):
         self.desc_edit.setText(e["description"] if e else "")
         self.icon_edit.setText(e["icon"] if e else "")
         self.lazy_check.setChecked(bool(e and e["lazy"]))
+        self.keywords_edit.setText(e.get("keywords", "") if e else "")
+        self.format_combo.setCurrentIndex(max(0, self.format_combo.findData(e.get("format", "") if e else "")))
         self.text_edit.setPlainText(e["text"] if e else "")
         self.loading = False
         self._update_icon_preview()
@@ -526,6 +551,8 @@ class SettingsDialog(QDialog):
         e["description"] = self.desc_edit.text()
         e["icon"] = self.icon_edit.text().strip()
         e["lazy"] = self.lazy_check.isChecked()
+        e["keywords"] = self.keywords_edit.text().strip()
+        e["format"] = self.format_combo.currentData()
         e["text"] = self.text_edit.toPlainText()
         self._refresh_item(self.list.currentItem(), e)
         self._update_icon_preview()
@@ -552,7 +579,8 @@ class SettingsDialog(QDialog):
         n = 1
         while f"new{n}" in existing:
             n += 1
-        self._insert_row({"key": f"new{n}", "text": "", "description": "", "icon": "", "lazy": False})
+        self._insert_row({"key": f"new{n}", "text": "", "description": "", "icon": "", "lazy": False,
+                          "keywords": "", "format": ""})
 
     def duplicate_entry(self):
         if e := self.current():
@@ -570,7 +598,7 @@ class SettingsDialog(QDialog):
     def apply_filter(self, text: str):
         text = text.lower()
         for row, e in enumerate(self.entries):
-            hit = not text or any(text in e[f].lower() for f in ("key", "description", "text"))
+            hit = not text or any(text in e[f].lower() for f in ("key", "description", "keywords", "text"))
             self.list.item(row).setHidden(not hit)
 
     # ---- editor helpers
@@ -588,16 +616,16 @@ class SettingsDialog(QDialog):
             self.text_edit.setTextCursor(cursor)
         self.insert_placeholder(snippet)
 
-    def prompt(self, name: str, label: str, default: str) -> str | None:
-        """Qt version of the runner's input dialog, for Run Now."""
-        if name == "asktext":
-            value, ok = QInputDialog.getMultiLineText(self, "Abbreviations", label, default)
-        else:
-            value, ok = QInputDialog.getText(self, "Abbreviations", label, text=default)
-        return value if ok else None
+    def ask(self, e: dict) -> dict | None:
+        """All prompts of e in one form, as for the runner; None if cancelled."""
+        prompts = k.ask_prompts(e["text"])
+        values = run_form(prompts, f"Abbreviations · {e['key']}", self)
+        return None if values is None else {(n, l): v for (n, l, _), v in zip(prompts, values)}
 
     def update_preview(self, force: bool = False):
         e = self.current()
+        k.ABBR_TEXTS.clear()  # for {abbr:key}, as edited here
+        k.ABBR_TEXTS.update({x["key"].lower(): x["text"] for x in self.entries})
         asks = bool(e and k.needs_input(e["text"]))
         lazy = bool(e and e["lazy"]) or asks
         self.run_now_btn.setVisible(lazy)
@@ -610,13 +638,15 @@ class SettingsDialog(QDialog):
                 "Asks for input when Enter is pressed. Click Run Now to test it." if asks else
                 "Computed when Enter is pressed. Click Run Now to test it.")
             return
-        answers = k.collect_answers(e["text"], self.prompt) if asks else None
+        answers = self.ask(e) if asks else None
         if asks and answers is None:
             return  # cancelled
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             timeout = k.LAZY_TIMEOUT if lazy else self.timeout_spin.value()
             result = k.expand(e["text"], self.arg_edit.text().strip(), timeout, answers=answers)
+            if e.get("format") == "markdown":
+                result += "\n\n— copied as HTML —\n" + k.markdown_to_html(result)
             self.preview.setStyleSheet("")
         except Exception as ex:
             result = f"Error: {ex}"

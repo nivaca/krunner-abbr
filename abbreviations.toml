@@ -4,10 +4,12 @@
 #
 # In KRunner type the trigger keyword and an abbreviation ("ex isod"), press
 # Enter, and the expansion is copied to the clipboard. The keyword alone lists all
-# abbreviations; "ex settings" opens the settings dialog, "ex help" (or "ex ?") the
-# reference, and "ex case Some Text" lists the text (or the clipboard) in every case
-# style. Each match also has buttons to paste into the previous window, copy the
-# template, or edit the abbreviation. Keys are case-insensitive.
+# abbreviations; "ex settings" opens the settings dialog and "ex help" (or "ex ?")
+# the reference. "ex case Some Text" lists the text (or the clipboard) in every case
+# style; "ex |unhyphen|join" applies filters (below) to typed text or the clipboard
+# without defining an abbreviation. Each match also has buttons to paste into the
+# previous window, copy the template, or edit the abbreviation. "ex clip" lists the
+# clipboard history (add text to search it). Keys are case-insensitive.
 #
 # Placeholders
 #   {date}               today, ISO           2026-10-27
@@ -15,15 +17,23 @@
 #   {now}                ISO date-time        2026-10-27T14:05:09
 #   {date:%d/%m/%Y}      any strftime format after ':'
 #   {date+1d}            offsets: s m h d w mo(nths) y, chainable: {now+1w-2h:%c}
+#   {date@es:%A %d de %B}  day and month names in another language (es, es_CO, de, fr…):
+#                        miércoles 28 de octubre; works with offsets: {date+1d@es:%A}
 #   {arg}                text typed after the abbreviation ("gh octocat")
 #   {arg:default}        ... with a default when nothing is typed
 #   {uuid}               random UUID4
 #   {env:USER}           environment variable
 #   {clipboard}          current clipboard contents
+#   {clipboard:2}        an earlier entry of Klipper's history (1 = current, 2 = previous…)
 #   {input}              text typed after the abbreviation, or else the clipboard
 #   {ask:Label}          opens an input box when Enter is pressed; {ask:Label=default}
 #                        pre-fills it; the same label asks once. Cancel copies nothing.
 #   {asktext:Label}      same, with a multi-line box
+#   {choose:Label=a, b, c}  pick an option from a list; "quote, to keep" a comma
+#   {opt:Label}…{/opt}   a checkbox keeping or dropping the text between; {opt:Label=yes}
+#                        starts ticked. All prompts of an abbreviation share one form.
+#   {cursor}             where the cursor ends up after pasting
+#   {abbr:name}          another abbreviation's expansion
 #   {cmd:shell command}  stdout of a command (see cmd_timeout); $ABBR_ARG holds {arg},
 #                        $ABBR_INPUT holds {input}, $ABBR_ASK1, $ABBR_ASK2… the answers
 #                        to prompts ($ABBR_ASK the first). Placeholders can't contain { or }.
@@ -32,6 +42,8 @@
 # Filters transform any placeholder and can be chained: {clipboard|unhyphen|join}
 #   upper lower title sentence swapcase   case (title = English title case)
 #   capitalize                             Capitalize Every Word (no title-case rules)
+#   titulo                                 Spanish title: El nombre de la rosa (keeps proper
+#                                          nouns, unless every word was capitalized)
 #   alternating randomcase                 aLtErNaTiNg cAsE, rAnDOm CasE
 #   join  join(", ")                       join lines with a space / a separator
 #   unhyphen                               rejoin words hyphenated across lines (PDFs)
@@ -49,6 +61,7 @@
 #   urlencode urldecode base64 unbase64
 #   roman unroman                          2026 ↔ MMXXVI
 #   nomacrons vtou jtoi                    Latin: ā → a, v → u, j → i
+#   noligatures latinize                   æ œ → ae oe; latinize = all of these, plus ë → e
 #   latex                                  escape & % $ # _ { } ~ ^ \
 #   stats words chars                      "12 words · 70 characters · 2 lines"
 #   quotes(from, to)                       convert quote styles; give several pairs to
@@ -63,9 +76,16 @@
 # Quote filter arguments that contain spaces or commas: replace(" ", "_").
 # In {cmd:...}, write shell pipes with spaces ("a | sort") so they aren't read as filters.
 #
-# Values are either a plain string or a table with text / description / icon / lazy.
-# lazy = true computes the expansion only when Enter is pressed (for slow commands such
-# as network lookups); a notification shows what was copied.
+# Values are either a plain string or a table with text / description / icon / lazy /
+# keywords / format. lazy = true computes the expansion only when Enter is pressed (for
+# slow commands such as network lookups); a notification shows what was copied.
+# keywords = "fecha hoy" adds words that find it (descriptions are searched too).
+# format = "markdown" or "html" copies it as formatted text (plain in terminals).
+#
+# [paste_keys] maps applications (window class or desktop file name) to the keys that
+# paste in them; terminals already use ctrl+shift+v. Keys: ctrl+v ctrl+shift+v shift+insert
+#   [paste_keys]
+#   "org.example.app" = "shift+insert"
 
 [settings]
 prefix = "ex"          # trigger keyword: type "ex isod"; "" = match abbreviations directly
@@ -397,3 +417,37 @@ icon = "mail-signed"
 [abbr.mail]
 text = "you@example.com"
 description = "Email address"
+
+[abbr.fecha]
+text = "{date@es:%-d de %B de %Y}"
+description = "Today's date in Spanish: 28 de octubre de 2026"
+icon = "view-calendar-day"
+
+[abbr.greet]
+text = "{choose:Greeting=Dear colleague, Dear Sir or Madam, Hello}"
+description = "Choose a greeting"
+icon = "mail-message-new"
+
+[abbr.cover]
+text = """Dear {ask:Name},
+
+please find attached my application for the {ask:Position} position.{opt:Mention CV=yes} My CV is attached as well.{/opt}
+
+{abbr:signoff}"""
+description = "Cover letter: asks for the details in one form"
+icon = "mail-message-new"
+
+[abbr.signoff]
+text = "Best regards,\n{env:USER}"
+description = "Sign-off used by cover"
+
+[abbr.mdsig]
+text = "**Best regards**,\n*{env:USER}*\n[example.org](https://example.org)"
+description = "Signature as formatted text"
+format = "markdown"
+keywords = "signature firma"
+
+[abbr.emc]
+text = "\\emph{{{cursor}}}"
+description = "LaTeX \\emph{} with the cursor inside, when pasting"
+icon = "format-text-italic"

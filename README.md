@@ -10,7 +10,10 @@ copies the unexpanded text, and **Edit** opens the abbreviation in the settings 
 Pasting presses Ctrl+V for you, which on Wayland needs `ydotool` (with its service
 running: `sudo dnf install ydotool && sudo systemctl enable --now ydotool`) or `wtype`;
 without one the text is still copied and a notification says why it wasn't pasted.
-Terminals that paste with Ctrl+Shift+V won't receive it.
+Terminals (Konsole, Yakuake, kitty, Alacritty, foot, WezTerm, Ghostty, GNOME Terminal…)
+get Ctrl+Shift+V instead: the runner asks KWin which window has the focus. Add other
+applications under `[paste_keys]`, by their window class or desktop file name:
+`"org.example.app" = "shift+insert"` (keys: `ctrl+v`, `ctrl+shift+v`, `shift+insert`).
 
 To make Enter paste as well, set `enter_pastes = true` (or tick "Enter: Paste into the
 previous window" in the settings dialog); the button then becomes **Copy without pasting**.
@@ -18,6 +21,12 @@ previous window" in the settings dialog); the button then becomes **Copy without
 `ex case Some Text` lists Some Text in every case style (`ex case` alone uses the
 clipboard): UPPER, lower, Title, Sentence, snake_case, camelCase, Train-Case, and the
 rest. Pick one and press Enter to copy it, or use its paste button.
+
+`ex |filter|filter(args) text` applies any chain of filters (see below) without defining
+an abbreviation: `ex |unhyphen|join` cleans up text copied from a PDF, `ex |replace(" ", "_")
+a b c` gives `a_b_c`. Without text it works on the clipboard. A partly typed name lists
+what it could become (`ex |tr` → `|train`, `ex |` → every filter), each with its result.
+Chains with `sh(…)` run only when you press Enter.
 
 ## Install
 
@@ -74,15 +83,60 @@ Other bundled examples: LaTeX/Markdown wrappers (`emph`, `cite`, `latex`, `mdlin
 `{ask:Label}` and `{asktext:Label}` open an input dialog when you press Enter and use
 the answer, which filters and commands can then process: `{ask:DOI|sh(…)}`, or
 `$ABBR_ASK` inside `{cmd:…}`. Examples: `citep`, `letter`, `days`, `askdoi`.
+`{choose:Label=a, b, c}` offers a list to pick from instead (example: `greet`).
+
+Dates can use another language's day and month names: `{date@es:%A %d de %B}` gives
+*miércoles 28 de octubre* on an English desktop (example: `fecha`); any installed locale
+works (`es_CO`, `de`, `fr`…). `{clipboard:2}` is the previous clipboard entry from
+Klipper's history, `{clipboard:3}` the one before, and `ex clip` lists the history in
+KRunner (`ex clip word` searches it) so you can copy or paste an older entry again.
+
+More filters: `titulo` gives a Spanish title (*El nombre de la rosa*), keeping proper
+nouns and acronyms, though in Every Word Capitalized input it can't tell proper nouns
+apart, so only acronyms survive. `latinize` normalizes Latin for searching and comparing
+(æ œ → ae oe, macrons, breves and diaereses removed, v → u, j → i); `noligatures` does
+only the first part.
 
 A desktop notification confirms every copy. Set `notify = false` (or untick "Show a
 notification after copying" in the dialog) to turn it off; abbreviations computed on
 Enter, and errors, still notify.
 
+`{cursor}` marks where the cursor should end up after pasting: `\emph{{{cursor}}}` pastes
+`\emph{}` with the cursor between the braces. When only copying, it is simply removed.
+
+`{abbr:sig}` inserts another abbreviation's expansion, so a signature or a letterhead
+lives in one place; prompts inside it are asked along with the rest.
+
+When an abbreviation asks for input, all its `{ask}`, `{asktext}`, `{choose}` and
+`{opt}` prompts appear together in one form (or one `kdialog` each without PySide6).
+`{opt:Label}…{/opt}` is a checkbox that keeps or drops the text between the tags;
+`{opt:Label=yes}` starts ticked. Example: `cover`.
+
+`format = "markdown"` (or `"html"`) copies an abbreviation as formatted text, so
+`**bold**`, `*italics*`, `[links](https://…)` and lists arrive formatted in mail, office
+and web editors. Pasted into a terminal it stays plain. Wayland's `wl-copy` offers the
+HTML to every application, so pasting a formatted abbreviation with plain Ctrl+V into a
+plain-text field (outside the terminals above) shows the HTML tags. Example: `mdsig`.
+
+`keywords = "fecha hoy"` adds words that find an abbreviation: from 3 letters on, words
+in descriptions and keywords match too, ranked below names (`ex fecha` → `isod`).
+
 Slow abbreviations can set `lazy = true` ("Compute only when Enter is pressed" in the
 dialog): KRunner shows the description instead of a live result, and the expansion runs
 in the background when you press Enter, with a notification when it lands on the
 clipboard. The bundled `bib` uses this to fetch BibTeX for a typed or copied DOI.
+
+## Importing from espanso
+
+    ./krunner_abbr.py --import-espanso base.yml           # print the converted abbreviations
+    ./krunner_abbr.py --import-espanso base.yml --write   # append them to your config
+
+This reads espanso match files, including packages from the espanso hub: triggers
+(`:date` becomes `date`), `replace`/`markdown`/`html`, `$|$`, forms, and the variables
+`echo`, `date`, `clipboard`, `shell`, `script`, `choice`, `match` and `form`. Matches
+that use anything else (regex triggers, images, `random`, global variables), or whose
+name already exists, are skipped with a note. `--write` keeps the previous config as
+`abbreviations.toml.bak`.
 
 ## Testing from the shell
 
