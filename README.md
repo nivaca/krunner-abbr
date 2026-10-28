@@ -121,6 +121,30 @@ plain-text field (outside the terminals above) shows the HTML tags. Example: `md
 `keywords = "fecha hoy"` adds words that find an abbreviation: from 3 letters on, words
 in descriptions and keywords match too, ranked below names (`ex fecha` → `isod`).
 
+`aliases = ["today"]` gives an abbreviation other names. `group = "Lookup"` shows it
+under that heading in KRunner and in `ex list`; `disabled_groups = ["Lookup"]` under
+`[settings]` hides a whole group (its abbreviations can still be included with `{abbr:…}`).
+Abbreviations you use often and recently rank higher (`rank_by_use = false` turns this
+off; the counts live in `~/.local/state/krunner-abbr/usage.json` and appear in `ex list`).
+
+`action = "open"` makes Enter open the expansion instead of copying it: a web page, a
+file or a folder. The bundled `logeion` and `rae` look up the typed or copied word in
+Logeion (Latin and Greek) or the RAE dictionary, and `doi` opens an article.
+
+`when = "regex"` suggests an abbreviation while the clipboard matches: typing just `ex`
+lists it first. The bundled `bib` and `doi` come up while a DOI is copied, `mdlink`
+while a URL is.
+
+`propagate_case = true` follows the case you type: `ex Sig` gives a Capitalized
+expansion, `ex SIG` an UPPERCASE one.
+
+More placeholders: `{selection}` is the selected text, no copying needed. `{arg1}`,
+`{arg2}`… are single typed words, with the last one taking the rest and "quotes" keeping
+spaces (`ex cit Cicero Off. 1.3`). `{random:a, b, c}` picks one option (`coin`),
+`{calc:…}` and the `|calc` filter do arithmetic (`ex calc 2*(3+4)`), and
+`{askdate:Label}` adds a date picker to the form, giving `2026-10-28`, which
+`|datefmt(%A %-d %B, es)` reformats (`due`).
+
 Slow abbreviations can set `lazy = true` ("Compute only when Enter is pressed" in the
 dialog): KRunner shows the description instead of a live result, and the expansion runs
 in the background when you press Enter, with a notification when it lands on the

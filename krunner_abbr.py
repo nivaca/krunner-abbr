@@ -9,6 +9,7 @@ Run with --expand KEY [ARG...] to test an abbreviation from the shell.
 """
 
 import argparse
+import ast
 import base64
 import calendar
 import csv
@@ -92,6 +93,7 @@ callDBus("{SERVICE}", "{OBJPATH}", "{SERVICE}", "ReportWindow",
 # KRunner match categories (Plasma 6 QueryMatch::CategoryRelevance)
 HIGHEST = 100
 LOW = 30
+HIGH = 70  # the keyword alone: abbreviations whose `when` matches the clipboard
 LOWEST = 0  # matched by description or keywords
 
 CMD_TIMEOUT = 2.0  # default seconds for {cmd:...} placeholders
@@ -101,7 +103,7 @@ SUBTEXT_MAX = 80
 # {name}, {name+1d-2h}, {name:spec}, {name+1w:spec}, {name@es:spec}, each optionally
 # followed by |filters
 PLACEHOLDER_RE = re.compile(
-    r"\{(?P<name>[a-z_]+)(?P<offsets>(?:[+-]\d+(?:mo|[smhdwMy]))*)(?:@(?P<lang>[A-Za-z_]+))?"
+    r"\{(?P<name>[a-z_]+\d*)(?P<offsets>(?:[+-]\d+(?:mo|[smhdwMy]))*)(?:@(?P<lang>[A-Za-z_]+))?"
     r"(?P<rest>[:|][^{}]*)?\}"
 )
 OFFSET_RE = re.compile(r"([+-])(\d+)(mo|[smhdwMy])")
@@ -125,6 +127,17 @@ def get_clipboard() -> str:
     except Exception:
         pass
     for cmd in (["wl-paste", "--no-newline"], ["xclip", "-o", "-selection", "clipboard"]):
+        if shutil.which(cmd[0]):
+            try:
+                return subprocess.run(cmd, capture_output=True, text=True, timeout=1).stdout
+            except Exception:
+                pass
+    return ""
+
+
+def get_selection() -> str:
+    """The selected (highlighted) text: the primary selection."""
+    for cmd in (["wl-paste", "--primary", "--no-newline"], ["xclip", "-o", "-selection", "primary"]):
         if shutil.which(cmd[0]):
             try:
                 return subprocess.run(cmd, capture_output=True, text=True, timeout=1).stdout
@@ -436,6 +449,54 @@ def latinize(text: str) -> str:
     return text.translate(str.maketrans("vVjJ", "uUiI"))
 
 
+_CALC_OPS = {
+    ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: a / b, ast.FloorDiv: lambda a, b: a // b, ast.Mod: lambda a, b: a % b,
+    ast.Pow: lambda a, b: a ** b,
+}
+
+
+def calc(expr: str) -> str:
+    """Arithmetic: + - * / // % ** ( ), round(x, n), abs(x). 1,5 is read as 1.5."""
+    text = expr.strip().replace("×", "*").replace("÷", "/").replace("^", "**")
+    if "." not in text:
+        text = re.sub(r"(\d),(\d)", r"\1.\2", text)
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            return ev(node.operand) * (-1 if isinstance(node.op, ast.USub) else 1)
+        if isinstance(node, ast.BinOp) and type(node.op) in _CALC_OPS:
+            a, b = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Pow) and abs(b) > 100:
+                raise ValueError("exponent too large")
+            return _CALC_OPS[type(node.op)](a, b)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ("round", "abs") and not node.keywords):
+            return {"round": round, "abs": abs}[node.func.id](*map(ev, node.args))
+        raise ValueError(f"can't calculate “{expr.strip()}”")
+
+    try:
+        value = ev(ast.parse(text, mode="eval"))
+    except (SyntaxError, ZeroDivisionError, TypeError) as e:
+        raise ValueError(f"can't calculate “{expr.strip()}”: {e}") from None
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
+        value = int(value)
+    return f"{value:.10g}" if isinstance(value, float) else str(value)
+
+
+def date_format(text: str, fmt: str, lang: str = "") -> str:
+    """Reformat an ISO date or date-time: datefmt(%A %d de %B, es)."""
+    try:
+        dt = datetime.fromisoformat(text.strip())
+    except ValueError:
+        raise ValueError(f"datefmt needs an ISO date such as 2026-10-28, got “{text.strip()}”")
+    return strftime_in(dt, fmt, lang or None)
+
+
 LATEX_ESCAPES = {
     "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
     "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
@@ -639,6 +700,8 @@ FILTERS = {
     "smartquotes": (smart_quotes, 0, 0, "straight → typographic quotes and apostrophes"),
     "straightquotes": (straight_quotes, 0, 0, "typographic quotes and guillemets → straight"),
     "stats": (text_stats, 0, 0, "word, character and line counts"),
+    "calc": (calc, 0, 0, "calculate: 2*(3+4) → 14; round(x, n), abs(x)"),
+    "datefmt": (date_format, 1, 2, "reformat an ISO date: datefmt(%A %d de %B, es)"),
     "words": (lambda s: str(len(s.split())), 0, 0, "word count"),
     "silent": (lambda s: "", 0, 0, "discard the value, e.g. an {ask} used only by a later {cmd}"),
     "chars": (lambda s: str(len(s)), 0, 0, "character count"),
@@ -799,8 +862,9 @@ DATE_DEFAULTS = {
 
 
 # {ask:Label=default} one line, {asktext:Label} multi-line, {choose:Label=a, b, c} a list,
-# {opt:Label}…{/opt} a checkbox that keeps or drops the text between the tags
-ASK_NAMES = ("ask", "asktext", "choose", "opt")
+# {opt:Label}…{/opt} a checkbox that keeps or drops the text between the tags,
+# {askdate:Label} a date picker giving YYYY-MM-DD (reformat it with |datefmt)
+ASK_NAMES = ("ask", "asktext", "choose", "opt", "askdate")
 OPT_RE = re.compile(r"\{opt:([^{}]*)\}(.*?)\{/opt\}", re.S)
 YES = ("yes", "y", "true", "on", "1", "sí", "si")
 CURSOR_MARK = "\ue000"  # where {cursor} was; removed before copying
@@ -808,6 +872,31 @@ MAX_INCLUDE_DEPTH = 8
 FORM_APP = Path(__file__).resolve().with_name("krunner_abbr_form.py")
 # every abbreviation's template by lowercase key, for {abbr:key}; kept current by Config
 ABBR_TEXTS: dict[str, str] = {}
+
+
+ARG_TOKEN_RE = re.compile(r'\s*(?:"([^"]*)"|(\S+))')
+
+
+def split_args(arg: str, n: int) -> list[str]:
+    """arg in n parts for {arg1}…{argN}: words, or "quoted text"; the last takes the rest."""
+    parts, pos = [], 0
+    for _ in range(n - 1):
+        m = ARG_TOKEN_RE.match(arg, pos)
+        if not m:
+            break
+        parts.append(m[1] if m[1] is not None else m[2])
+        pos = m.end()
+    rest = arg[pos:].strip()
+    if rest:
+        quoted = len(rest) > 1 and rest[0] == rest[-1] == '"' and '"' not in rest[1:-1]
+        parts.append(rest[1:-1] if quoted else rest)
+    return parts + [""] * (n - len(parts))
+
+
+def arg_count(template: str) -> int:
+    """The highest N of the {argN} placeholders in template (and what it includes)."""
+    return max((int(m["name"][3:]) for m in PLACEHOLDER_RE.finditer(with_includes(template))
+                if re.fullmatch(r"arg\d+", m["name"])), default=0)
 
 
 def placeholder_spec(m: re.Match) -> str | None:
@@ -860,7 +949,7 @@ def choices(default: str) -> list[str]:
     """The options of {choose:Label=a, b, "c, d"}; quote one to keep a comma."""
     options = [o for o in parse_filter_args(default) if o]
     if not options:
-        raise ValueError("{choose:Label=a, b, c} needs options after =")
+        raise ValueError("needs options: {choose:Label=a, b, c} or {random:a, b, c}")
     return options
 
 
@@ -869,6 +958,10 @@ def kdialog_prompt(name: str, label: str, default: str) -> str | None:
     if name == "opt":
         res = subprocess.run(["kdialog", "--title", "Abbreviations", "--yesnocancel", label])
         return {0: "1", 1: ""}.get(res.returncode)
+    if name == "askdate":
+        res = subprocess.run(["kdialog", "--title", "Abbreviations", "--calendar", label,
+                              "--dateformat", "yyyy-MM-dd"], capture_output=True, text=True)
+        return res.stdout.strip() if res.returncode == 0 else None
     if name == "choose":
         options = choices(default)
         cmd = ["kdialog", "--title", "Abbreviations", "--combobox", label, *options,
@@ -883,6 +976,9 @@ def kdialog_prompt(name: str, label: str, default: str) -> str | None:
 def terminal_prompt(name: str, label: str, default: str) -> str | None:
     """Ask on the terminal (for --expand); {asktext} reads until an empty line."""
     try:
+        if name == "askdate":
+            today = datetime.now().date().isoformat()
+            return input(f"{label} (YYYY-MM-DD) [{today}]: ").strip() or today
         if name == "opt":
             on = default.strip().lower() in YES
             answer = input(f"{label}? [{'Y/n' if on else 'y/N'}]: ").strip().lower()
@@ -941,7 +1037,7 @@ def collect_answers(template: str, prompt=None, title: str = "Abbreviations") ->
 
 def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
            clipboard: str | None = None, answers: dict | None = None,
-           keep_cursor: bool = False, _depth: int = 0) -> str:
+           keep_cursor: bool = False, _depth: int = 0, _args: list[str] | None = None) -> str:
     """Expand all placeholders in template. Raises ValueError on bad input.
 
     Pass clipboard to use a pre-read value instead of querying the clipboard, and
@@ -957,6 +1053,8 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
         return m[2] if answers[key] else ""
 
     template = OPT_RE.sub(optional, template)
+    if _args is None:
+        _args = split_args(arg, arg_count(template))
 
     def clip() -> str:
         return get_clipboard() if clipboard is None else clipboard
@@ -977,6 +1075,15 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
             raise ValueError(f"offsets and @language only apply to date/time/now: {m[0]}")
         if name == "arg":
             return arg or (spec or "")
+        if re.fullmatch(r"arg\d+", name):
+            n = int(name[3:])
+            return (_args[n - 1] if 0 < n <= len(_args) else "") or (spec or "")
+        if name == "selection":
+            return get_selection()
+        if name == "random":
+            return random.choice(choices(spec or ""))
+        if name == "calc":
+            return calc(spec or "")
         if name == "uuid":
             return str(uuid.uuid4())
         if name == "cursor":
@@ -989,7 +1096,7 @@ def expand(template: str, arg: str = "", timeout: float = CMD_TIMEOUT,
                 raise ValueError(f"{m[0]}: no abbreviation “{spec}”")
             if _depth >= MAX_INCLUDE_DEPTH:
                 raise ValueError(f"{m[0]}: abbreviations include each other in a loop")
-            return expand(included, arg, timeout, clipboard, answers, True, _depth + 1)
+            return expand(included, arg, timeout, clipboard, answers, True, _depth + 1, _args)
         if name == "env":
             return os.environ.get(spec or "", "")
         if name == "clipboard":
@@ -1044,11 +1151,57 @@ def is_lazy(abbr: dict) -> bool:
 
 
 def uses_arg(template: str) -> bool:
-    return any(m["name"] in ("arg", "cmd", "input")
+    return any(m["name"] in ("cmd", "input") or re.fullmatch(r"arg\d*", m["name"])
                for m in PLACEHOLDER_RE.finditer(with_includes(template)))
 
 
 # ---------------------------------------------------------------- config
+
+
+def as_list(value) -> list[str]:
+    """A TOML list, or a string of words separated by spaces or commas."""
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v).strip()]
+    return [w for w in re.split(r"[\s,]+", str(value or "")) if w]
+
+
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "krunner-abbr"
+USAGE_FILE = STATE_DIR / "usage.json"
+USAGE_HALF_LIFE = 30  # days for a use to count half as much
+
+
+class Usage:
+    """How often and how recently each abbreviation was used, for ranking."""
+
+    def __init__(self, path: Path = USAGE_FILE):
+        self.path, self.mtime, self.data = path, None, {}
+
+    def load(self) -> dict:
+        try:
+            mtime = self.path.stat().st_mtime
+            if mtime != self.mtime:
+                self.data, self.mtime = json.loads(self.path.read_text()), mtime
+        except (OSError, ValueError):
+            pass
+        return self.data
+
+    def record(self, key: str) -> None:
+        entry = self.load().setdefault(key.lower(), {"count": 0, "last": 0})
+        entry["count"] += 1
+        entry["last"] = time.time()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(self.data, indent=1))
+            self.mtime = self.path.stat().st_mtime
+        except OSError as e:
+            print(f"cannot save usage: {e}", file=sys.stderr)
+
+    def score(self, key: str) -> float:
+        entry = self.load().get(key.lower())
+        if not entry:
+            return 0.0
+        age = max(0.0, time.time() - entry["last"]) / 86400
+        return entry["count"] * 0.5 ** (age / USAGE_HALF_LIFE)
 
 
 BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -1074,7 +1227,11 @@ class Config:
         self.notify = True
         self.enter_pastes = False
         self.paste_keys: dict[str, str] = dict(TERMINAL_PASTE_KEYS)
-        self.abbrs: dict[str, dict] = {}
+        self.rank_by_use = True
+        self.disabled_groups: list[str] = []
+        self.abbrs: dict[str, dict] = {}  # by lowercase key; without disabled groups
+        self.aliases: dict[str, str] = {}  # lowercase alias -> lowercase key
+        self.disabled: dict[str, dict] = {}  # abbreviations in disabled groups
         self.error = ""
 
     def reload_if_changed(self) -> None:
@@ -1101,15 +1258,24 @@ class Config:
         self.paste_keys = dict(TERMINAL_PASTE_KEYS)
         self.paste_keys.update({app.lower(): str(keys).lower()
                                 for app, keys in data.get("paste_keys", {}).items()})
-        abbrs = {}
+        self.rank_by_use = bool(settings.get("rank_by_use", True))
+        self.disabled_groups = [str(g) for g in settings.get("disabled_groups", [])]
+        off = {g.lower() for g in self.disabled_groups}
+        abbrs, disabled = {}, {}
         for key, val in data.get("abbr", {}).items():
             if isinstance(val, str):
                 val = {"text": val}
             if isinstance(val, dict) and isinstance(val.get("text"), str):
-                abbrs[key.lower()] = {"key": key, **val}
-        self.abbrs, self.error = abbrs, ""
-        ABBR_TEXTS.clear()
-        ABBR_TEXTS.update({key: abbr["text"] for key, abbr in abbrs.items()})
+                target = disabled if str(val.get("group", "")).lower() in off else abbrs
+                target[key.lower()] = {"key": key, **val}
+        aliases = {}
+        for key, abbr in abbrs.items():
+            for alias in as_list(abbr.get("aliases")):
+                if alias.lower() not in abbrs:  # a real name wins over an alias
+                    aliases.setdefault(alias.lower(), key)
+        self.abbrs, self.aliases, self.disabled, self.error = abbrs, aliases, disabled, ""
+        ABBR_TEXTS.clear()  # disabled groups can still be included with {abbr:key}
+        ABBR_TEXTS.update({key: abbr["text"] for key, abbr in (disabled | abbrs).items()})
 
 
 # ---------------------------------------------------------------- matching
@@ -1236,6 +1402,14 @@ def open_settings(key: str = "") -> None:
                      start_new_session=True)
 
 
+def clipboard_matches(abbr: dict, clipboard: str) -> bool:
+    """Whether abbr's `when` regex matches the clipboard."""
+    try:
+        return bool(abbr.get("when")) and re.search(abbr["when"], clipboard) is not None
+    except re.error:
+        return False
+
+
 def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
     """Return (abbr, arg, category) for every abbreviation matching query."""
     query = query.strip()
@@ -1243,28 +1417,32 @@ def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
         query = strip_trigger(query, cfg.prefix)
         if query is None:
             return []
-        if not query:  # just the keyword: list everything
-            return [(abbr, "", LOW) for _, abbr in sorted(cfg.abbrs.items())]
+        if not query:  # just the keyword: list everything, clipboard suggestions first
+            clipboard = get_clipboard() if any(a.get("when") for a in cfg.abbrs.values()) else ""
+            return [(abbr, "", HIGH if clipboard_matches(abbr, clipboard) else LOW)
+                    for _, abbr in sorted(cfg.abbrs.items())]
     if not query:
         return []
     key, _, arg = query.partition(" ")
     key, arg = key.lower(), arg.strip()
 
     matches = []
-    exact = cfg.abbrs.get(key)
+    exact = cfg.abbrs.get(key) or cfg.abbrs.get(cfg.aliases.get(key, ""))
     if exact and (not arg or uses_arg(exact["text"])):
         matches.append((exact, arg, HIGHEST))
     if not arg and cfg.min_prefix_chars and len(key) >= cfg.min_prefix_chars:
         for k, abbr in sorted(cfg.abbrs.items()):
-            if k != key and k.startswith(key):
+            names = [k] + [a.lower() for a in as_list(abbr.get("aliases"))]
+            if abbr is not exact and any(n.startswith(key) for n in names):
                 matches.append((abbr, "", LOW))
         # then words in descriptions and keywords: "ex fecha" finds isod; 3+ letters
         want = deaccent(key)
         if len(want) >= max(3, cfg.min_prefix_chars):
             word = re.compile(rf"\b{re.escape(want)}", re.I)
             for k, abbr in sorted(cfg.abbrs.items()):
-                about = f"{abbr.get('description', '')} {abbr.get('keywords', '')}"
-                if not k.startswith(key) and word.search(deaccent(about)):
+                about = f"{abbr.get('description', '')} {' '.join(as_list(abbr.get('keywords')))}"
+                listed = any(a is abbr for a, _, _ in matches)
+                if not listed and word.search(deaccent(about)):
                     matches.append((abbr, "", LOWEST))
     return matches
 
@@ -1275,6 +1453,29 @@ def one_line(text: str, limit: int) -> str:
 
 
 # ---------------------------------------------------------------- D-Bus service
+
+
+def typed_key(cfg: Config, query: str) -> str:
+    """The abbreviation as typed (with its case), without the keyword."""
+    rest = strip_trigger(query.strip(), cfg.prefix) if cfg.prefix else query.strip()
+    return (rest or "").split(" ", 1)[0]
+
+
+def case_style(typed: str) -> str:
+    """"upper" for SIG, "title" for Sig, "" for sig."""
+    letters = [c for c in typed if c.isalpha()]
+    if len(letters) > 1 and all(c.isupper() for c in letters):
+        return "upper"
+    return "title" if letters and letters[0].isupper() else ""
+
+
+def apply_case(text: str, style: str) -> str:
+    return text.upper() if style == "upper" else _cap(text) if style == "title" else text
+
+
+def open_url(target: str) -> None:
+    subprocess.Popen(["xdg-open", target.strip()], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def case_icon(name: str) -> str:
@@ -1288,6 +1489,7 @@ def run_service() -> None:
     from gi.repository import GLib
 
     cfg = Config(CONFIG_FILE)
+    usage = Usage()
 
     def actions(*ids: str):
         """Match property listing which ACTIONS buttons a match shows (none if empty).
@@ -1331,22 +1533,35 @@ def run_service() -> None:
             clip_search = word_query(cfg, query, CLIP_WORD)
             if clip_search is not None:
                 results.extend(self.clip_results(clip_search))
-            for abbr, arg, category in find_matches(cfg, query):
-                match_id = f"{abbr['key']}\x1f{arg}"
-                relevance = {HIGHEST: 1.0, LOW: 0.5}.get(category, 0.3)
+            matches = find_matches(cfg, query)
+            scores = {a["key"]: usage.score(a["key"]) if cfg.rank_by_use else 0.0
+                      for a, _, _ in matches}
+            top = max(scores.values(), default=0.0) or 1.0
+            typed = typed_key(cfg, query)
+            for abbr, arg, category in matches:
+                style = case_style(typed) if abbr.get("propagate_case") and category == HIGHEST else ""
+                match_id = f"{abbr['key']}\x1f{arg}\x1f{style}"
+                # within a category, used more and more recently ranks higher
+                relevance = {HIGHEST: 1.0, HIGH: 0.8, LOW: 0.5}.get(category, 0.3) \
+                    + 0.09 * scores[abbr["key"]] / top * (category != HIGHEST)
+                opens = abbr.get("action") == "open"
+                buttons = actions("template", "edit") if opens else abbr_actions()
+                group = abbr.get("group") or "Abbreviations"
+                note = "matches the clipboard · " if category == HIGH else ""
                 if is_lazy(abbr):  # computed in Run: slow commands, or prompts for input
                     label = abbr.get("description") or one_line(abbr["text"], 200)
                     hint = ("press Enter, then fill in the prompt" if needs_input(abbr["text"])
-                            else "press Enter to run and copy")
+                            else "press Enter to open" if opens else "press Enter to run and copy")
                     results.append((
                         match_id, f"{label}: {arg}" if arg else label,
                         abbr.get("icon", "system-run"), category, relevance,
-                        {"subtext": f"{abbr['key']} · {hint}", "category": "Abbreviations",
-                         "actions": abbr_actions()},
+                        {"subtext": f"{note}{abbr['key']} · {hint}", "category": group,
+                         "actions": buttons},
                     ))
                     continue
                 try:
-                    text = expand(abbr["text"], arg, cfg.cmd_timeout, keep_cursor=True)
+                    text = apply_case(expand(abbr["text"], arg, cfg.cmd_timeout, keep_cursor=True),
+                                      style)
                 except Exception as e:
                     results.append((
                         match_id, f"{abbr['key']}: {e}", "dialog-error", category, 0.1,
@@ -1354,13 +1569,12 @@ def run_service() -> None:
                     ))
                     continue
                 self.shown[match_id] = text
-                subtext = f"{abbr['key']} · {abbr['description']}" if abbr.get("description") \
-                    else f"{abbr['key']} → copy to clipboard"
+                about = abbr.get("description") or ("open" if opens else "copy to clipboard")
+                subtext = f"{note}{abbr['key']} · {about}" + (" · Enter opens it" if opens else "")
                 results.append((
-                    match_id, one_line(split_cursor(text)[0], 200), abbr.get("icon", "edit-paste"),
-                    category,
-                    relevance, {"subtext": subtext, "category": "Abbreviations",
-                                "actions": abbr_actions()},
+                    match_id, one_line(split_cursor(text)[0], 200),
+                    abbr.get("icon", "internet-web-browser" if opens else "edit-paste"), category,
+                    relevance, {"subtext": subtext, "category": group, "actions": buttons},
                 ))
             return results
 
@@ -1484,7 +1698,7 @@ def run_service() -> None:
                     return
                 self.deliver({"key": chain, "icon": FILTER_ICON}, text, paste)
                 return
-            key, _, arg = match_id.partition("\x1f")
+            key, arg, style = (match_id.split("\x1f", 2) + ["", ""])[:3]
             abbr = cfg.abbrs.get(key.lower())
             if action_id == "edit":
                 open_settings(abbr["key"] if abbr else key)
@@ -1499,11 +1713,12 @@ def run_service() -> None:
             if abbr is None and text is None:
                 return
             if abbr is not None and is_lazy(abbr):
-                self.run_lazy(abbr, arg, paste)
+                self.run_lazy(abbr, arg, paste, style)
                 return
             if text is None:  # stale id: recompute
                 try:
-                    text = expand(abbr["text"], arg, cfg.cmd_timeout, keep_cursor=True)
+                    text = apply_case(expand(abbr["text"], arg, cfg.cmd_timeout, keep_cursor=True),
+                                      style)
                 except Exception as e:
                     notify(f"“{abbr['key']}” failed", str(e), "dialog-error")
                     return
@@ -1517,6 +1732,11 @@ def run_service() -> None:
             the cursor to {cursor}.
             """
             text, back = split_cursor(text)
+            if "text" in abbr:  # a configured abbreviation, not a case/filter/history result
+                usage.record(abbr["key"])
+            if abbr.get("action") == "open":
+                open_url(text)
+                return
             fmt = abbr.get("format", "")
             html_text = markdown_to_html(text) if fmt == "markdown" else \
                 text if fmt == "html" else None
@@ -1607,7 +1827,7 @@ def run_service() -> None:
 
             threading.Thread(target=work, daemon=True).start()
 
-        def run_lazy(self, abbr: dict, arg: str, paste: bool = False):
+        def run_lazy(self, abbr: dict, arg: str, paste: bool = False, style: str = ""):
             """Expand in a thread so slow commands don't block KRunner's queries."""
             clipboard = get_clipboard()  # D-Bus calls stay on the main thread
 
@@ -1617,8 +1837,8 @@ def run_service() -> None:
                                               title=f"Abbreviations · {abbr['key']}")
                     if answers is None:
                         return  # prompt cancelled: copy nothing
-                    text, error = expand(abbr["text"], arg, LAZY_TIMEOUT, clipboard, answers,
-                                         keep_cursor=True), None
+                    text, error = apply_case(expand(abbr["text"], arg, LAZY_TIMEOUT, clipboard,
+                                                    answers, keep_cursor=True), style), None
                 except Exception as e:
                     text, error = None, e
                 GLib.idle_add(finish, text, error)

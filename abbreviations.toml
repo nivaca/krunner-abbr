@@ -34,6 +34,12 @@
 #                        starts ticked. All prompts of an abbreviation share one form.
 #   {cursor}             where the cursor ends up after pasting
 #   {abbr:name}          another abbreviation's expansion
+#   {arg1} {arg2}…       single typed words, the last one used takes the rest;
+#                        "quote words" to keep spaces: cit Cicero Off. 1.3
+#   {selection}          the selected (highlighted) text, without copying it
+#   {askdate:Label}      a date picker giving 2026-10-28; reformat with |datefmt(%d/%m/%Y)
+#   {random:a, b, c}     one option at random
+#   {calc:2*(3+4)}       arithmetic (also the |calc filter: {input|calc})
 #   {cmd:shell command}  stdout of a command (see cmd_timeout); $ABBR_ARG holds {arg},
 #                        $ABBR_INPUT holds {input}, $ABBR_ASK1, $ABBR_ASK2… the answers
 #                        to prompts ($ABBR_ASK the first). Placeholders can't contain { or }.
@@ -81,6 +87,10 @@
 # slow commands such as network lookups); a notification shows what was copied.
 # keywords = "fecha hoy" adds words that find it (descriptions are searched too).
 # format = "markdown" or "html" copies it as formatted text (plain in terminals).
+# aliases = ["fh", "hoy"] are other names; group = "LaTeX" is KRunner's category and a
+# section of "ex list". action = "open" makes Enter open the expansion (a link, file or
+# folder) instead of copying it. when = "regex" lists it first under the bare keyword
+# while the clipboard matches. propagate_case = true: Sig → Capitalized, SIG → UPPERCASE.
 #
 # [paste_keys] maps applications (window class or desktop file name) to the keys that
 # paste in them; terminals already use ctrl+shift+v. Keys: ctrl+v ctrl+shift+v shift+insert
@@ -93,10 +103,12 @@ min_prefix_chars = 2   # also suggest abbreviations starting with what you typed
 cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
 notify = true          # notification after every copy (run-on-Enter results and errors always notify)
 enter_pastes = false   # true: Enter also pastes into the previous window (needs ydotool or wtype)
+rank_by_use = true     # frequent and recent abbreviations first (counts in ~/.local/state/krunner-abbr)
+disabled_groups = []   # groups not offered in KRunner, e.g. ["LaTeX"]
 
 [abbr]
 # --- dates & times
-isod = { text = "{date}", description = "Today's date (ISO)" }
+isod = { text = "{date}", description = "Today's date (ISO)", aliases = ["today"] }
 isodt = { text = "{now}", description = "Date and time (ISO)" }
 isot = { text = "{time}", description = "Current time" }
 ts = { text = "{now:%Y%m%d-%H%M%S}", description = "Timestamp for file names" }
@@ -215,6 +227,7 @@ icon = "format-text-code"
 text = "[{arg}]({clipboard})"
 description = "Markdown link: mdlink Title (URL from clipboard)"
 icon = "edit-link"
+when = "^https?://"     # listed first under the bare keyword while a URL is copied
 
 [abbr.guil]
 text = "«{input}»"
@@ -257,6 +270,7 @@ icon = "view-calendar"
 text = '{cmd:curl -sLf -H "Accept: application/x-bibtex; charset=utf-8" "https://doi.org/$(echo "$ABBR_INPUT" | sed "s|.*doi.org/||")"|strip}'
 description = "BibTeX for a DOI (typed or copied)"
 icon = "bookmarks"
+when = '10\.\d{4,9}/\S+'   # suggested first while a DOI is copied
 lazy = true             # computed only when Enter is pressed
 
 # --- quotes (clipboard or typed text)
@@ -451,3 +465,45 @@ keywords = "signature firma"
 text = "\\emph{{{cursor}}}"
 description = "LaTeX \\emph{} with the cursor inside, when pasting"
 icon = "format-text-italic"
+
+# --- lookups: Enter opens the page
+[abbr.logeion]
+text = "https://logeion.uchicago.edu/{input|strip|urlencode}"
+description = "Look up a Latin or Greek word in Logeion (typed, or the clipboard)"
+action = "open"
+group = "Lookup"
+icon = "accessories-dictionary"
+
+[abbr.rae]
+text = "https://dle.rae.es/{input|strip|urlencode}"
+description = "Look up a Spanish word in the RAE dictionary"
+action = "open"
+group = "Lookup"
+icon = "accessories-dictionary"
+
+[abbr.doi]
+text = "https://doi.org/{input|strip|sub(\"^.*doi\\.org/\", \"\")}"
+description = "Open the article for a DOI"
+action = "open"
+group = "Lookup"
+icon = "internet-web-browser"
+when = '^\s*(https?://(dx\.)?doi\.org/)?10\.\d{4,9}/\S+\s*$'
+
+# --- more placeholders
+[abbr.cit]
+text = "{arg1}, \\textit{{{arg2}}} {arg3}"
+description = "Ancient citation: cit Cicero Off. 1.3 → Cicero, \\textit{Off.} 1.3"
+
+[abbr.coin]
+text = "{random:heads, tails}"
+description = "Toss a coin"
+
+[abbr.calc]
+text = "{input|calc}"
+description = "Calculate: calc 2*(3+4)"
+icon = "accessories-calculator"
+
+[abbr.due]
+text = "{askdate:Due date|datefmt(%A %-d %B %Y)}"
+description = "Pick a date: Wednesday 28 October 2026"
+icon = "view-calendar-day"

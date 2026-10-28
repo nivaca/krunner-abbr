@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""One dialog for all the prompts of an abbreviation: {ask}, {asktext}, {choose} and {opt}.
+"""One dialog for all the prompts of an abbreviation: {ask}, {asktext}, {choose}, {opt}
+and {askdate}.
 
 The runner starts it with the window title as argument and the prompts as a JSON list of
 [name, label, default] on stdin. It prints the answers as a JSON list in the same order
@@ -15,9 +16,10 @@ import krunner_abbr as k
 
 def run_form(prompts: list, title: str = "Abbreviations", parent=None) -> list[str] | None:
     """Show the form; the answers in prompt order, or None if cancelled."""
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QDate, Qt
     from PySide6.QtWidgets import (
-        QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QPlainTextEdit,
+        QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFormLayout, QLineEdit,
+        QPlainTextEdit,
     )
 
     dlg = QDialog(parent)
@@ -32,7 +34,12 @@ def run_form(prompts: list, title: str = "Abbreviations", parent=None) -> list[s
             form.addRow("", w)
             getters.append(lambda w=w: "1" if w.isChecked() else "")
             continue
-        if name == "choose":
+        if name == "askdate":
+            start = QDate.fromString(default.strip(), "yyyy-MM-dd")
+            w = QDateEdit(start if start.isValid() else QDate.currentDate(), calendarPopup=True)
+            w.setDisplayFormat("yyyy-MM-dd")
+            getters.append(lambda w=w: w.date().toString("yyyy-MM-dd"))
+        elif name == "choose":
             w = QComboBox()
             w.addItems(k.choices(default))
             getters.append(w.currentText)

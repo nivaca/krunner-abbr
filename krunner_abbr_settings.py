@@ -48,6 +48,11 @@ PLACEHOLDERS = [
     ("Ask for multi-line text (dialog)", "{asktext:Label}"),
     ("Choose from a list (dialog)", "{choose:Label=one, two, three}"),
     ("Optional section (checkbox)", "{opt:Label}text{/opt}"),
+    ("Pick a date (dialog)", "{askdate:Label|datefmt(%d/%m/%Y)}"),
+    ("Selected text", "{selection}"),
+    ("First / second typed word", "{arg1} {arg2}"),
+    ("Random choice", "{random:one, two, three}"),
+    ("Calculation", "{calc:2*(3+4)}"),
     ("Cursor position after pasting", "{cursor}"),
     ("Another abbreviation", "{abbr:name}"),
     ("Random UUID", "{uuid}"),
@@ -76,8 +81,13 @@ def load_config(path) -> tuple[dict, list[dict]]:
             "description": val.get("description", ""),
             "icon": val.get("icon", ""),
             "lazy": bool(val.get("lazy", False)),
-            "keywords": val.get("keywords", ""),
+            "keywords": " ".join(k.as_list(val.get("keywords"))),
             "format": val.get("format", ""),
+            "aliases": " ".join(k.as_list(val.get("aliases"))),
+            "group": val.get("group", ""),
+            "action": val.get("action", ""),
+            "when": val.get("when", ""),
+            "propagate_case": bool(val.get("propagate_case", False)),
         })
     return settings, entries
 
@@ -108,13 +118,16 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
         f"cmd_timeout = {settings['cmd_timeout']}",
         f"notify = {'true' if settings['notify'] else 'false'}",
         f"enter_pastes = {'true' if settings['enter_pastes'] else 'false'}",
+        f"rank_by_use = {'true' if settings.get('rank_by_use', True) else 'false'}",
+        "disabled_groups = [" + ", ".join(toml_str(g) for g in settings.get("disabled_groups", [])) + "]",
     ]
     if settings.get("paste_keys"):
         out += ["", "[paste_keys]"]
         out += [f"{toml_key(app)} = {toml_str(keys)}" for app, keys in settings["paste_keys"].items()]
     out += ["", "[abbr]"]
     # plain key = value pairs must precede sub-tables in TOML
-    extras = ("description", "icon", "lazy", "keywords", "format")
+    extras = ("description", "icon", "lazy", "keywords", "format", "aliases", "group", "action",
+              "when", "propagate_case")
     simple = [e for e in entries if not any(e.get(f) for f in extras)]
     tables = [e for e in entries if any(e.get(f) for f in extras)]
     out += [f"{toml_key(e['key'])} = {toml_str(e['text'])}" for e in simple]
@@ -130,6 +143,13 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
             out.append(f"keywords = {toml_str(e['keywords'])}")
         if e.get("format"):
             out.append(f"format = {toml_str(e['format'])}")
+        if e.get("aliases"):
+            out.append("aliases = [" + ", ".join(toml_str(a) for a in k.as_list(e["aliases"])) + "]")
+        for name in ("group", "action", "when"):
+            if e.get(name):
+                out.append(f"{name} = {toml_str(e[name])}")
+        if e.get("propagate_case"):
+            out.append("propagate_case = true")
     return "\n".join(out) + "\n"
 
 
@@ -262,6 +282,17 @@ class SettingsDialog(QDialog):
             "a button on each match copies without pasting. Needs <code>ydotool</code> "
             "(with its service running) or <code>wtype</code>; without one, Enter only copies."
         ))
+
+        self.rank_check = QCheckBox("Rank abbreviations you use often and recently higher")
+        self.rank_check.toggled.connect(self._general_changed)
+        form.addRow("Ranking:", self.rank_check)
+        self.disabled_groups_edit = QLineEdit(placeholderText="e.g. LaTeX, Symbols")
+        self.disabled_groups_edit.textChanged.connect(self._general_changed)
+        form.addRow("Disabled groups:", self.disabled_groups_edit)
+        form.addRow("", self._hint(
+            "Abbreviations in these groups (comma-separated) are not offered in KRunner; "
+            "other abbreviations can still include them with <code>{abbr:name}</code>."
+        ))
         return w
 
     def _build_abbr_tab(self) -> QWidget:
@@ -297,6 +328,15 @@ class SettingsDialog(QDialog):
         self.key_edit = QLineEdit()
         self.desc_edit = QLineEdit(placeholderText="optional, shown under the result")
         self.keywords_edit = QLineEdit(placeholderText="optional words that also find it, e.g. fecha hoy")
+        self.aliases_edit = QLineEdit(placeholderText="optional other names, e.g. fh hoy")
+        self.group_edit = QLineEdit(placeholderText="optional, e.g. LaTeX; shown as KRunner's category")
+        self.action_combo = QComboBox()
+        self.action_combo.addItem("Copy (or paste) the expansion", "")
+        self.action_combo.addItem("Open it (a link, file or folder)", "open")
+        self.when_edit = QLineEdit(placeholderText=r"optional regex, e.g. ^https?:// or 10\.\d{4,}/")
+        self.when_edit.setToolTip("When the clipboard matches, typing just the keyword lists "
+                                  "this abbreviation first.")
+        self.case_check = QCheckBox("Match the case typed: Sig → Capitalized, SIG → UPPERCASE")
         self.format_combo = QComboBox()
         for label, value in (("Plain text", ""), ("Markdown → formatted text", "markdown"),
                              ("HTML → formatted text", "html")):
@@ -340,6 +380,8 @@ class SettingsDialog(QDialog):
         form.addRow("Abbreviation:", self.key_edit)
         form.addRow("Description:", self.desc_edit)
         form.addRow("Keywords:", self.keywords_edit)
+        form.addRow("Aliases:", self.aliases_edit)
+        form.addRow("Group:", self.group_edit)
         form.addRow("Icon:", icon_row)
         self.lazy_check = QCheckBox("Compute only when Enter is pressed")
         self.lazy_check.setToolTip(
@@ -349,6 +391,9 @@ class SettingsDialog(QDialog):
         )
         form.addRow("", self.lazy_check)
         form.addRow("Format:", self.format_combo)
+        form.addRow("Enter:", self.action_combo)
+        form.addRow("Suggest when:", self.when_edit)
+        form.addRow("", self.case_check)
         text_label = QWidget()
         tl = QVBoxLayout(text_label)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -372,6 +417,10 @@ class SettingsDialog(QDialog):
         self.icon_edit.textChanged.connect(self._entry_changed)
         self.lazy_check.toggled.connect(self._entry_changed)
         self.keywords_edit.textChanged.connect(self._entry_changed)
+        for w in (self.aliases_edit, self.group_edit, self.when_edit):
+            w.textChanged.connect(self._entry_changed)
+        self.action_combo.currentIndexChanged.connect(self._entry_changed)
+        self.case_check.toggled.connect(self._entry_changed)
         self.format_combo.currentIndexChanged.connect(self._entry_changed)
         self.text_edit.textChanged.connect(self._entry_changed)
         self.arg_edit.textChanged.connect(lambda: self.preview_timer.start())
@@ -405,6 +454,8 @@ class SettingsDialog(QDialog):
         self.timeout_spin.setValue(float(settings.get("cmd_timeout", k.CMD_TIMEOUT)))
         self.notify_check.setChecked(bool(settings.get("notify", True)))
         self.enter_pastes_check.setChecked(bool(settings.get("enter_pastes", False)))
+        self.rank_check.setChecked(bool(settings.get("rank_by_use", True)))
+        self.disabled_groups_edit.setText(", ".join(k.as_list(settings.get("disabled_groups", []))))
         self.list.clear()
         for e in self.entries:
             self.list.addItem(self._make_item(e))
@@ -426,6 +477,10 @@ class SettingsDialog(QDialog):
                 return self._fail(row, f"“{key}” is defined twice (names are case-insensitive).")
             if not e["text"]:
                 return self._fail(row, f"“{key}” has an empty expansion.")
+            try:
+                re.compile(e.get("when") or "")
+            except re.error as ex:
+                return self._fail(row, f"“{key}”: the “Suggest when” pattern is not valid: {ex}")
             seen[key.lower()] = row
         if any(c.isspace() for c in self.prefix_edit.text().strip()):
             return "The trigger keyword cannot contain spaces."
@@ -455,6 +510,9 @@ class SettingsDialog(QDialog):
             "cmd_timeout": round(self.timeout_spin.value(), 1),
             "notify": self.notify_check.isChecked(),
             "enter_pastes": self.enter_pastes_check.isChecked(),
+            "rank_by_use": self.rank_check.isChecked(),
+            "disabled_groups": [g.strip() for g in self.disabled_groups_edit.text().split(",")
+                                if g.strip()],
             "paste_keys": self.paste_keys,
         }
         text = dump_config(settings, self.entries)
@@ -538,6 +596,11 @@ class SettingsDialog(QDialog):
         self.icon_edit.setText(e["icon"] if e else "")
         self.lazy_check.setChecked(bool(e and e["lazy"]))
         self.keywords_edit.setText(e.get("keywords", "") if e else "")
+        self.aliases_edit.setText(e.get("aliases", "") if e else "")
+        self.group_edit.setText(e.get("group", "") if e else "")
+        self.when_edit.setText(e.get("when", "") if e else "")
+        self.action_combo.setCurrentIndex(max(0, self.action_combo.findData(e.get("action", "") if e else "")))
+        self.case_check.setChecked(bool(e and e.get("propagate_case")))
         self.format_combo.setCurrentIndex(max(0, self.format_combo.findData(e.get("format", "") if e else "")))
         self.text_edit.setPlainText(e["text"] if e else "")
         self.loading = False
@@ -552,6 +615,11 @@ class SettingsDialog(QDialog):
         e["icon"] = self.icon_edit.text().strip()
         e["lazy"] = self.lazy_check.isChecked()
         e["keywords"] = self.keywords_edit.text().strip()
+        e["aliases"] = self.aliases_edit.text().strip()
+        e["group"] = self.group_edit.text().strip()
+        e["when"] = self.when_edit.text().strip()
+        e["action"] = self.action_combo.currentData()
+        e["propagate_case"] = self.case_check.isChecked()
         e["format"] = self.format_combo.currentData()
         e["text"] = self.text_edit.toPlainText()
         self._refresh_item(self.list.currentItem(), e)
@@ -598,7 +666,7 @@ class SettingsDialog(QDialog):
     def apply_filter(self, text: str):
         text = text.lower()
         for row, e in enumerate(self.entries):
-            hit = not text or any(text in e[f].lower() for f in ("key", "description", "keywords", "text"))
+            hit = not text or any(text in e[f].lower() for f in ("key", "description", "keywords", "aliases", "group", "text"))
             self.list.item(row).setHidden(not hit)
 
     # ---- editor helpers

@@ -70,6 +70,9 @@ PLACEHOLDER_DOCS = [
      "{date@es:%A %d de %B}"),
     ("{arg}", "Text typed after the abbreviation", None),
     ("{arg:default}", "… with a default when nothing is typed", None),
+    ("{arg1} {arg2}…", 'Single typed words; the last one used takes the rest. "Quote" words '
+     "to keep spaces: ex cit Cicero Off. 1.3 gives Cicero, Off., 1.3", None),
+    ("{selection}", "The selected (highlighted) text, without copying it", None),
     ("{clipboard}", "Current clipboard contents", None),
     ("{clipboard:2}", "An earlier clipboard entry from Klipper's history: 2 = the previous one",
      None),
@@ -83,6 +86,11 @@ PLACEHOLDER_DOCS = [
     ("{abbr:name}", "Another abbreviation's expansion", None),
     ("{choose:Label=a, b, c}", "Pick one option from a list when Enter is pressed; quote an "
      'option to keep a comma: "Dear Sir, Madam"', None),
+    ("{askdate:Label}", "A date picker; gives 2026-10-28, which |datefmt(%d/%m/%Y) reformats",
+     None),
+    ("{random:a, b, c}", "One of the options at random", "{random:heads, tails}"),
+    ("{calc:2*(3+4)}", "Arithmetic: + - * / // % ** ( ), round(x, n), abs(x); also as |calc",
+     "{calc:2*(3+4)}"),
     ("{uuid}", "Random UUID", "{uuid}"),
     ("{env:USER}", "Environment variable", "{env:USER}"),
     ("{cmd:command}", "Output of a shell command; $ABBR_ARG and $ABBR_INPUT hold {arg} and "
@@ -178,6 +186,10 @@ td.nowrap { white-space: nowrap; }
 .rendered > :first-child { margin-top: 0; } .rendered > :last-child { margin-bottom: 0; }
 td code.key { cursor: copy; }
 tr:target td { background: var(--badge-bg); }
+tr.group td {
+  font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .04em; background: var(--bg); padding-top: 14px;
+}
 .notice { border: 1px solid var(--error); border-radius: 8px; padding: 8px 12px; margin: 14px 0 0; }
 @media (max-width: 640px) {
   .bar, main { padding-left: 16px; padding-right: 16px; }
@@ -330,7 +342,13 @@ suggestions off), {c("cmd_timeout")} (seconds), {c("notify")} and {c("enter_past
 is either {c('key = "text"')} or a table with {c("text")}, {c("description")},
 {c("icon")}, {c("lazy = true")} (run on Enter, with up to
 {k.LAZY_TIMEOUT:.0f}&nbsp;s for commands), {c("keywords")} (extra words that find it) and
-{c('format = "markdown"')} or {c('"html"')} (copied as formatted text, plain in terminals).
+{c('format = "markdown"')} or {c('"html"')} (copied as formatted text, plain in terminals),
+{c('aliases = ["fh", "hoy"]')} (other names), {c('group = "LaTeX"')} (KRunner category and list
+section), {c('action = "open"')} (Enter opens the expansion, a link, file or folder, instead of
+copying it), {c('when = "regex"')} (listed first under the bare keyword while the clipboard
+matches) and {c("propagate_case = true")} (Sig → Capitalized, SIG → UPPERCASE).
+{c("rank_by_use")} under {c("[settings]")} ranks frequent and recent abbreviations higher
+(usage is kept in {c(str(k.USAGE_FILE))}); {c('disabled_groups = ["LaTeX"]')} hides groups.
 {c("[paste_keys]")} maps applications to the keys that paste in them, e.g.
 {c('"org.example.app" = "shift+insert"')}; terminals already use Ctrl+Shift+V.
 {c("--import-espanso FILE")} converts espanso match files.</p>
@@ -343,11 +361,13 @@ def _default(cfg):
     return type("Cfg", (), {"prefix": k.DEFAULT_PREFIX})()
 
 
-PROMPT_KINDS = {"ask": "text", "asktext": "multi-line text", "choose": "choice", "opt": "checkbox"}
+PROMPT_KINDS = {"ask": "text", "asktext": "multi-line text", "choose": "choice", "opt": "checkbox",
+                "askdate": "date"}
 CHIPS = [  # (data-kind value, label)
     ("", "All"), ("text", "Take typed text"), ("clip", "Use the clipboard"),
     ("asks", "Ask for input"), ("lazy", "Run on Enter"), ("fmt", "Formatted"),
-    ("shell", "Run commands"), ("error", "Errors"),
+    ("open", "Open links"), ("when", "Clipboard suggestions"), ("shell", "Run commands"),
+    ("error", "Errors"),
 ]
 
 
@@ -384,17 +404,30 @@ def shorten(text: str) -> str:
 
 def list_page(cfg) -> str:
     clipboard = k.get_clipboard()
+    tracker = k.Usage()
+    usage = tracker.load()
+    grouped = any(a.get("group") for a in cfg.abbrs.values())
     used_by: dict[str, list[str]] = {}
     for abbr in cfg.abbrs.values():
         for key in includes(abbr["text"]):
             used_by.setdefault(key.lower(), []).append(abbr["key"])
     rows = []
     counts = {kind: 0 for kind, _ in CHIPS[1:]}
-    for abbr in sorted(cfg.abbrs.values(), key=lambda a: a["key"].lower()):
+    group = None
+    for abbr in sorted(cfg.abbrs.values(),
+                       key=lambda a: (not a.get("group"), str(a.get("group", "")).lower(), a["key"].lower())):
+        if grouped and abbr.get("group", "Other") != group:
+            group = abbr.get("group", "Other")
+            rows.append(f'<tr class=group><td colspan=4>{escape(group)}</td></tr>')
         template = abbr["text"]
         names = placeholder_names(k.with_includes(template))
         kinds = set()
-        if names & {"arg", "input"}:
+        if abbr.get("action") == "open":
+            kinds.add("open")
+        if abbr.get("when"):
+            kinds.add("when")
+        takes_text = bool(names & {"arg", "input"}) or any(re.fullmatch(r"arg\d+", n) for n in names)
+        if takes_text:
             kinds.add("text")
         if names & {"clipboard", "input"}:
             kinds.add("clip")
@@ -416,7 +449,12 @@ def list_page(cfg) -> str:
             result = '<span class="muted">computed when Enter is pressed</span>'
         else:
             text, ok = safe_expand(template, cfg.cmd_timeout, clipboard)
-            if ok:
+            if ok and "open" in kinds:
+                target = text.strip()
+                link = (f'<a href="{escape(target)}">{escape(shorten(target))}</a>'
+                        if re.match(r"https?://", target) else escape(shorten(target)))
+                result = f'<span class="muted">opens</span> <span class="result">{link}</span>'
+            elif ok:
                 result = f'<span class="result">{escape(shorten(text))}</span>'
             elif "clip" in kinds:  # depends on what was copied, e.g. |roman on a date
                 result = (f'<span class="muted">not for the current clipboard: '
@@ -426,23 +464,36 @@ def list_page(cfg) -> str:
                 result = f'<span class="result error">{escape(shorten(text))}</span>'
             if ok and abbr.get("format") == "markdown":
                 result += f'<div class="rendered">{k.markdown_to_html(text)}</div>'
-            if names & {"arg", "input"}:
+            if takes_text:
                 example, ok2 = safe_expand(template, cfg.cmd_timeout, clipboard, SAMPLE_TEXT)
                 sub.append(f"with text: <code>{escape(typed(cfg, abbr['key'] + ' ' + SAMPLE_TEXT))}</code>"
                            f' → <span class="result{"" if ok2 else " error"}">{escape(shorten(example))}</span>')
         if "cursor" in names:
             sub.append("pasting leaves the cursor at <code>{cursor}</code>")
+        if abbr.get("when"):
+            hit = k.clipboard_matches(abbr, clipboard)
+            sub.append(f"suggested first when the clipboard matches <code>{escape(abbr['when'])}</code>"
+                       + (" (it does now)" if hit else ""))
+        if abbr.get("propagate_case"):
+            sub.append(f"matches the case typed: <code>{escape(typed(cfg, abbr['key'].capitalize()))}</code>"
+                       f" → Capitalized, <code>{escape(typed(cfg, abbr['key'].upper()))}</code> → UPPERCASE")
         for kind in kinds:
             counts[kind] += 1
 
         badges = "".join(f'<span class="badge{" warn" if b == "error" else ""}">{label}</span>'
                          for b, label in (("lazy", "on Enter"), ("fmt", abbr.get("format", "")),
-                                          ("error", "error")) if b in kinds)
+                                          ("open", "opens"), ("error", "error")) if b in kinds)
+        aliases = k.as_list(abbr.get("aliases"))
+        if aliases:
+            badges += "<span class=sub>also " + ", ".join(
+                f"<code>{escape(typed(cfg, a))}</code>" for a in aliases) + "</span>"
+        use = usage.get(abbr["key"].lower(), {})
+        if use:
+            last = datetime.fromtimestamp(use.get("last", 0)).strftime("%Y-%m-%d")
+            badges += f"<span class=sub>used {use.get('count', 0)}× · last {last}</span>"
         about = [escape(abbr.get("description", ""))]
         if abbr.get("keywords"):
-            kw = abbr["keywords"]
-            kw = " ".join(kw) if isinstance(kw, list) else kw
-            about.append(f"<span class=sub>keywords: {escape(kw)}</span>")
+            about.append(f"<span class=sub>keywords: {escape(' '.join(k.as_list(abbr['keywords'])))}</span>")
         if inc := includes(template):
             about.append("<span class=sub>includes " + ", ".join(
                 f'<a href="#a-{escape(i.lower())}">{escape(i)}</a>' for i in inc) + "</span>")
@@ -451,10 +502,11 @@ def list_page(cfg) -> str:
                 f'<a href="#a-{escape(u.lower())}">{escape(u)}</a>' for u in users) + "</span>")
         result += "".join(f"<span class=sub>{n}</span>" for n in sub)
         search = " ".join([abbr["key"], abbr.get("description", ""), str(abbr.get("keywords", "")),
-                           template]).lower()
+                           " ".join(aliases), str(abbr.get("group", "")), template]).lower()
+        score = tracker.score(abbr["key"])
         rows.append(
             f'<tr id="a-{escape(abbr["key"].lower())}" data-kind="{" ".join(sorted(kinds))}"'
-            f' data-search="{escape(search)}">'
+            f' data-search="{escape(search)}" data-score="{score:.4f}" data-key="{escape(abbr["key"].lower())}">'
             f'<td class=nowrap><code class=key title="Click to copy">{escape(typed(cfg, abbr["key"]))}</code>'
             f"{badges}</td><td>{''.join(about)}</td>"
             f"<td><code>{highlight(template, cfg)}</code></td><td>{result}</td></tr>"
@@ -470,6 +522,10 @@ def list_page(cfg) -> str:
                f"<b>{counts['lazy']}</b> run on Enter, <b>{counts['fmt']}</b> formatted. "
                f'<span class="muted">Keyword {c(cfg.prefix) if cfg.prefix else "none"} · '
                f"{c(str(cfg.path))}, changed {modified}</span></p>")
+    if cfg.disabled:
+        off = ", ".join(escape(g) for g in cfg.disabled_groups)
+        summary += (f'<p class="muted">{len(cfg.disabled)} more in disabled groups ({off}), '
+                    "not offered in KRunner.</p>")
     if counts["error"]:
         summary += (f'<p class="notice"><b>{counts["error"]}</b> abbreviation'
                     f'{"s" if counts["error"] > 1 else ""} currently fail to expand: '
@@ -482,7 +538,8 @@ def list_page(cfg) -> str:
 {summary}
 <input class="search" type="search" placeholder="Search names, descriptions, keywords, templates…"
        autofocus oninput="update()">
-<div class="chips">{chips}</div>
+<div class="chips">{chips}
+<button type=button id=sortbtn onclick="toggleSort()">Sort: {"by group" if grouped else "by name"}</button></div>
 <div class="scroll"><table id="abbrs">
 <tr><th>Type</th><th>Description</th><th>Template</th><th>Expansion now</th></tr>
 {"".join(rows)}
@@ -491,12 +548,30 @@ def list_page(cfg) -> str:
 opened; examples use the typed text {c(SAMPLE_TEXT)}. Click an abbreviation to copy what to
 type. Edit abbreviations with {c(typed(cfg if cfg.prefix else _default(cfg), "settings"))}.</p>
 <script>
-let kind = "";
+let kind = "", byUse = false;
+const table = document.querySelector("#abbrs tbody") || document.querySelector("#abbrs");
+const original = [...table.querySelectorAll("tr[data-kind], tr.group")];
 function update() {{
   const q = document.querySelector(".search").value.toLowerCase();
   for (const row of document.querySelectorAll("#abbrs tr[data-kind]"))
     row.hidden = (q && !row.dataset.search.includes(q)) ||
                  (kind && !row.dataset.kind.split(" ").includes(kind));
+  for (const head of document.querySelectorAll("#abbrs tr.group")) {{
+    let next = head.nextElementSibling, any = false;
+    for (; next && !next.classList.contains("group"); next = next.nextElementSibling)
+      any ||= !next.hidden;
+    head.hidden = byUse || !any;
+  }}
+}}
+function toggleSort() {{
+  byUse = !byUse;
+  const rows = byUse
+    ? original.filter(r => r.dataset.kind !== undefined)
+        .sort((a, b) => b.dataset.score - a.dataset.score || a.dataset.key.localeCompare(b.dataset.key))
+    : original;
+  for (const r of rows) table.appendChild(r);
+  document.querySelector("#sortbtn").textContent = byUse ? "Sort: most used" : "Sort: {"by group" if grouped else "by name"}";
+  update();
 }}
 function chip(k) {{
   kind = k;
