@@ -209,9 +209,9 @@ class SettingsDialog(QDialog):
         form.addRow("Trigger keyword:", self.prefix_edit)
         form.addRow("", self._hint(
             "Only handle KRunner queries that start with this keyword, e.g. "
-            "<code>abbr isod</code>. A word keyword must be followed by a space; a "
+            "<code>ex isod</code>. A word keyword must be followed by a space; a "
             "symbol such as <code>;</code> need not be. The keyword alone lists all "
-            "abbreviations, and <code>abbr settings</code> opens this dialog. Leave "
+            "abbreviations, and <code>ex settings</code> opens this dialog. Leave "
             "empty to match abbreviations directly."
         ))
         self.trigger_example = QLabel()

@@ -1,7 +1,7 @@
 # krunner-abbr
 
 KRunner (Plasma 6) plugin that expands abbreviations. Type the trigger keyword and an
-abbreviation in KRunner (`abbr isod`), press Enter, and the expansion is copied to the
+abbreviation in KRunner (`ex isod`), press Enter, and the expansion is copied to the
 clipboard. The keyword alone lists all abbreviations.
 
 ## Install
@@ -20,9 +20,9 @@ To remove it, run `./uninstall.sh`. Your abbreviations file is kept unless you a
 
 ## Settings
 
-Type `abbr help` for a reference page (placeholders, filters, quote styles) or
-`abbr list` for a searchable table of every abbreviation and its current expansion;
-both open in your browser. Type `abbr settings` in KRunner (`<keyword> settings` if you changed the keyword), or
+Type `ex help` for a reference page (placeholders, filters, quote styles) or
+`ex list` for a searchable table of every abbreviation and its current expansion;
+both open in your browser. Type `ex settings` in KRunner (`<keyword> settings` if you changed the keyword), or
 run `./krunner_abbr_settings.py` (needs PySide6). It sets the trigger keyword, partial-match
 suggestions and the command timeout, and lets you add and edit abbreviations with a
 live preview. Saving rewrites the config file and keeps the previous version as
@@ -36,7 +36,7 @@ The example file documents all placeholders: `{date}`, `{now+1d:%A}`, `{arg}`,
 `{uuid}`, `{env:VAR}`, `{clipboard}`, `{input}`, `{cmd:...}`, and others.
 
 Filters transform any placeholder and can be chained, which makes clipboard clean-up
-one keystroke away: copy some text, type `abbr title`, press Enter, and the clipboard
+one keystroke away: copy some text, type `ex title`, press Enter, and the clipboard
 now holds it in Title Case. Bundled examples: `title`, `lower`, `upper`, `sentence`,
 `join`, `unwrap` (fixes text copied from PDFs) and `slug`. Write your own with filters
 such as `{clipboard|unhyphen|join}`, `{input|replace(" ", "_")}` or
@@ -64,4 +64,4 @@ clipboard. The bundled `bib` uses this to fetch BibTeX for a typed or copied DOI
 ## Testing from the shell
 
     ./krunner_abbr.py --list          # every abbreviation with its current expansion
-    ./krunner_abbr.py --expand abbr gh foo  # what KRunner shows for "abbr gh foo"
+    ./krunner_abbr.py --expand ex gh foo  # what KRunner shows for "ex gh foo"

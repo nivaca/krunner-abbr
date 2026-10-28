@@ -37,7 +37,7 @@ CONFIG_FILE = CONFIG_DIR / "abbreviations.toml"
 EXAMPLE_CONFIG = HERE / "abbreviations.toml"
 SETTINGS_APP = HERE / "krunner_abbr_settings.py"
 
-DEFAULT_PREFIX = "abbr"
+DEFAULT_PREFIX = "ex"
 SETTINGS_WORD = "settings"  # "<keyword> settings" opens the settings dialog
 # built-in commands: word -> (title, subtext, icon); match ids are "\x1e" + word
 BUILTINS = {
@@ -736,7 +736,7 @@ def strip_trigger(query: str, trigger: str) -> str | None:
     head, rest = query[:len(trigger)], query[len(trigger):]
     if head.lower() != trigger.lower():
         return None
-    # a word keyword ("abbr") needs a space after it; a symbol (";") does not
+    # a word keyword ("ex") needs a space after it; a symbol (";") does not
     if trigger[-1].isalnum() and rest and not rest[0].isspace():
         return None
     return rest.lstrip()
@@ -744,7 +744,7 @@ def strip_trigger(query: str, trigger: str) -> str | None:
 
 def builtin_matches(cfg: Config, query: str) -> list[tuple[str, int]]:
     """(word, category) for each built-in command (settings, help, list) matching query."""
-    # without a configured keyword, "abbr settings" etc. still work
+    # without a configured keyword, "ex settings" etc. still work
     rest = strip_trigger(query.strip(), cfg.prefix or DEFAULT_PREFIX)
     if rest is None:
         return []

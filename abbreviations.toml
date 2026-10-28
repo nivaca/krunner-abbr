@@ -2,9 +2,9 @@
 # Installed to ~/.config/krunner-abbr/abbreviations.toml; edits are picked up
 # automatically on the next keystroke in KRunner (no restart needed).
 #
-# In KRunner type the trigger keyword and an abbreviation ("abbr isod"), press
+# In KRunner type the trigger keyword and an abbreviation ("ex isod"), press
 # Enter, and the expansion is copied to the clipboard. The keyword alone lists all
-# abbreviations; "abbr settings" opens the settings dialog. Keys are case-insensitive.
+# abbreviations; "ex settings" opens the settings dialog. Keys are case-insensitive.
 #
 # Placeholders
 #   {date}               today, ISO           2026-10-27
@@ -58,7 +58,7 @@
 # as network lookups); a notification shows what was copied.
 
 [settings]
-prefix = "abbr"        # trigger keyword: type "abbr isod"; "" = match abbreviations directly
+prefix = "ex"          # trigger keyword: type "ex isod"; "" = match abbreviations directly
 min_prefix_chars = 2   # also suggest abbreviations starting with what you typed; 0 = exact only
 cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
 notify = false         # notification after every copy (run-on-Enter results and errors always notify)
@@ -93,7 +93,7 @@ sect = { text = "§", description = "Section sign" }
 para = { text = "¶", description = "Pilcrow (paragraph sign)" }
 check = { text = "✓", description = "Check mark" }
 
-# --- clipboard (or typed text) transformations: copy, then e.g. "abbr title"
+# --- clipboard (or typed text) transformations: copy, then e.g. "ex title"
 [abbr.title]
 text = "{input|title}"
 description = "Clipboard or typed text → Title Case"

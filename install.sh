@@ -48,7 +48,7 @@ fi
 pkill -f "$HERE/krunner_abbr.py" || true
 kquitapp6 krunner 2>/dev/null || true
 # build the usage hint from the configured keyword, using the runner's own rules
-IFS=$'\t' read -r EXAMPLE SETTINGS < <(python3 - "$HERE" <<'EOF' 2>/dev/null || printf "'abbr isod'\t'abbr settings'\n"
+IFS=$'\t' read -r EXAMPLE SETTINGS < <(python3 - "$HERE" <<'EOF' 2>/dev/null || printf "'ex isod'\t'ex settings'\n"
 import sys
 sys.path.insert(0, sys.argv[1])
 import krunner_abbr as k
