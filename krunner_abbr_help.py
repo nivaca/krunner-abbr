@@ -5,6 +5,8 @@ are opened, so they always match what the runner actually does.
 """
 
 import os
+import re
+from datetime import datetime
 from html import escape
 from pathlib import Path
 
@@ -13,6 +15,49 @@ import krunner_abbr as k
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "krunner-abbr"
 
 LIST_RESULT_MAX = 300  # characters of each expansion shown on the list page
+SAMPLE_TEXT = "Hello World"  # typed text for the list page's "with text" examples
+
+# filter -> (input, chain) for the help page's examples; other filters without required
+# arguments are shown on FILTER_SAMPLE
+FILTER_SAMPLE = "the name of the rose"
+IDENT_SAMPLE = "parseHTTP response"
+FILTER_EXAMPLES = {
+    "titulo": ("El Nombre De La Rosa", "|titulo"),
+    "swapcase": ("Hello World", "|swapcase"),
+    **{n: (IDENT_SAMPLE, f"|{n}") for n in (
+        "snake", "kebab", "constant", "dot", "camel", "pascal", "train", "ada", "cobol", "path",
+        "flat", "space", "start")},
+    "join": ("first line\nsecond line", "|join"),
+    "unhyphen": ("hyphen-\nated words", "|unhyphen"),
+    "squeeze": ("too    many   spaces", "|squeeze"),
+    "strip": ("  padded  ", "|strip"),
+    "replace": ("a b c", '|replace(" ", "_")'),
+    "sub": ("call 555-1234", r'|sub("\d", "#")'),
+    "deaccent": ("café crème", "|deaccent"),
+    "slug": ("Café: the Menu!", "|slug"),
+    "sort": ("pear\napple\nitem 10\nitem 2", "|sort"),
+    "sortitems": ("pear, apple, fig", '|sortitems(", ")'),
+    "uniq": ("a\nb\na", "|uniq"),
+    "reverse": ("one\ntwo\nthree", "|reverse"),
+    "shuffle": ("one\ntwo\nthree", "|shuffle"),
+    "number": ("first\nsecond", "|number"),
+    "urlencode": ("a b&c", "|urlencode"),
+    "urldecode": ("a%20b%26c", "|urldecode"),
+    "base64": ("hello", "|base64"),
+    "unbase64": ("aGVsbG8=", "|unbase64"),
+    "roman": ("2026", "|roman"),
+    "unroman": ("MMXXVI", "|unroman"),
+    "nomacrons": ("āmīcus", "|nomacrons"),
+    "noligatures": ("Cæsar", "|noligatures"),
+    "latinize": ("poëta Iūlius vīvit", "|latinize"),
+    "vtou": ("vivit", "|vtou"),
+    "jtoi": ("iam jam", "|jtoi"),
+    "latex": ("50% & $5", "|latex"),
+    "quotes": ("«a “b” c»", "|quotes(guillemets, double, double, single)"),
+    "smartquotes": ('"it\'s"', "|smartquotes"),
+    "straightquotes": ("“it’s”", "|straightquotes"),
+    "sh": ("pear\napple", "|sh(sort)"),
+}
 
 # (syntax, description, template whose current expansion is shown, or None)
 PLACEHOLDER_DOCS = [
@@ -112,6 +157,28 @@ td.nowrap { white-space: nowrap; }
 }
 .search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .scroll { overflow-x: auto; }
+.toc { display: flex; gap: 6px 14px; flex-wrap: wrap; margin: 18px 0 0; font-size: 14px; }
+.toc a, td a { color: var(--accent); text-decoration: none; }
+.toc a:hover, td a:hover { text-decoration: underline; }
+.summary { margin: 18px 0 0; }
+.summary b { font-weight: 650; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+.chips button {
+  font: inherit; font-size: 13px; color: var(--muted); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; padding: 2px 10px; cursor: pointer;
+}
+.chips button:hover { color: var(--text); }
+.chips button.on { color: var(--accent); background: var(--badge-bg); border-color: var(--accent); }
+.ph { color: var(--accent); }
+.ph a { color: inherit; text-decoration: underline dotted; }
+.sub { display: block; font-size: 13px; color: var(--muted); margin-top: 3px; }
+.sub code { font-size: 12px; }
+.badge.warn { color: var(--error); }
+.rendered { margin-top: 6px; padding: 6px 10px; border-left: 3px solid var(--border); }
+.rendered > :first-child { margin-top: 0; } .rendered > :last-child { margin-bottom: 0; }
+td code.key { cursor: copy; }
+tr:target td { background: var(--badge-bg); }
+.notice { border: 1px solid var(--error); border-radius: 8px; padding: 8px 12px; margin: 14px 0 0; }
 @media (max-width: 640px) {
   .bar, main { padding-left: 16px; padding-right: 16px; }
   th, td { padding: 6px 8px; }
@@ -149,18 +216,21 @@ def page(title: str, current: str, body: str) -> str:
 """
 
 
-def safe_expand(template: str, timeout: float, clipboard: str) -> tuple[str, bool]:
+def safe_expand(template: str, timeout: float, clipboard: str, arg: str = "") -> tuple[str, bool]:
     """(result, ok) for template, never raising."""
     try:
-        return k.expand(template, "", timeout, clipboard), True
+        return k.expand(template, arg, timeout, clipboard), True
     except Exception as e:
         return str(e), False
 
 
 def help_page(cfg) -> str:
     c = lambda s: f"<code>{escape(s)}</code>"
-    usage = f"""
-<h2>Using it</h2>
+    toc = """<nav class="toc"><a href="#using">Using it</a><a href="#placeholders">Placeholders</a>
+<a href="#filters">Filters</a><a href="#quotes">Quote styles</a><a href="#config">Configuration file</a>
+<a href="list.html">All abbreviations →</a></nav>"""
+    usage = toc + f"""
+<h2 id="using">Using it</h2>
 <ul>
   <li>Type {c(typed(cfg, "isod"))} in KRunner and press <b>Enter</b>: the expansion is copied
       to the clipboard.</li>
@@ -203,7 +273,7 @@ Configuration: {c(str(k.CONFIG_FILE))}</p>
         rows.append(f"<tr><td class=nowrap>{c(syntax)}</td><td>{escape(desc)}</td>"
                     f"<td>{now}</td></tr>")
     placeholders = f"""
-<h2>Placeholders</h2>
+<h2 id="placeholders">Placeholders</h2>
 <div class="scroll"><table>
 <tr><th>Placeholder</th><th>Meaning</th><th>Right now</th></tr>
 {"".join(rows)}
@@ -212,16 +282,27 @@ Configuration: {c(str(k.CONFIG_FILE))}</p>
     rows = []
     for name, (_, lo, hi, desc) in k.FILTERS.items():
         call = name if hi == 0 else f"{name}(…)" if lo else f"{name}, {name}(…)"
-        rows.append(f"<tr><td class=nowrap>{c('|' + call)}</td><td>{escape(desc)}</td></tr>")
+        example = FILTER_EXAMPLES.get(name) or (None if lo else (FILTER_SAMPLE, f"|{name}"))
+        shown = ""
+        if example:
+            source, chain = example
+            try:
+                result, ok = k.run_chain(chain, source), True
+            except Exception as e:
+                result, ok = str(e), False
+            shown = (f"{c(chain)}<span class=sub><span class=result>{escape(source)}</span> → "
+                     f'<span class="result{"" if ok else " error"}">{escape(result)}</span></span>')
+        rows.append(f"<tr id=f-{name}><td class=nowrap>{c('|' + call)}</td><td>{escape(desc)}</td>"
+                    f"<td>{shown}</td></tr>")
     filters = f"""
-<h2>Filters</h2>
+<h2 id="filters">Filters</h2>
 <p>Filters transform any placeholder and can be chained, left to right:
 {c("{clipboard|unhyphen|join}")}, {c("{date:%Y|roman}")}.
 Quote arguments that contain spaces or commas: {c('replace(" ", "_")')}.
 Inside {c("{cmd:…}")}, write shell pipes with spaces ({c("a | sort")}) so they are not
 read as filters. Placeholders cannot contain {c("{")} or {c("}")}.</p>
 <div class="scroll"><table>
-<tr><th>Filter</th><th>Effect</th></tr>
+<tr><th>Filter</th><th>Effect</th><th>Example</th></tr>
 {"".join(rows)}
 </table></div>
 """
@@ -230,7 +311,7 @@ read as filters. Placeholders cannot contain {c("{")} or {c("}")}.</p>
         rows.append(f"<tr><td class=nowrap>{c(name)}</td>"
                     f"<td class=result>{escape(opener)}text{escape(closer)}</td></tr>")
     quotes = f"""
-<h2>Quote styles</h2>
+<h2 id="quotes">Quote styles</h2>
 <p>For {c("|quotes(from, to)")}. Give several pairs to convert them in one pass, which keeps
 nested quotes right: {c("quotes(guillemets, double, double, single)")} turns
 <span class=result>«a “b” c»</span> into <span class=result>“a ‘b’ c”</span>. A literal pair
@@ -241,7 +322,7 @@ such as {c("«»")} works too.</p>
 </table></div>
 """
     config = f"""
-<h2>Configuration file</h2>
+<h2 id="config">Configuration file</h2>
 <p>{c(str(k.CONFIG_FILE))} is reloaded on the next keystroke after it changes. Under
 {c("[settings]")}: {c("prefix")} (trigger keyword), {c("min_prefix_chars")} (0 turns
 suggestions off), {c("cmd_timeout")} (seconds), {c("notify")} and {c("enter_pastes")}
@@ -262,42 +343,173 @@ def _default(cfg):
     return type("Cfg", (), {"prefix": k.DEFAULT_PREFIX})()
 
 
+PROMPT_KINDS = {"ask": "text", "asktext": "multi-line text", "choose": "choice", "opt": "checkbox"}
+CHIPS = [  # (data-kind value, label)
+    ("", "All"), ("text", "Take typed text"), ("clip", "Use the clipboard"),
+    ("asks", "Ask for input"), ("lazy", "Run on Enter"), ("fmt", "Formatted"),
+    ("shell", "Run commands"), ("error", "Errors"),
+]
+
+
+def placeholder_names(template: str) -> set[str]:
+    return {m["name"] for m in k.PLACEHOLDER_RE.finditer(template)}
+
+
+def includes(template: str) -> list[str]:
+    """Keys of the abbreviations template includes with {abbr:key}."""
+    return [spec.strip() for m in k.PLACEHOLDER_RE.finditer(template)
+            if m["name"] == "abbr" and (spec := k.placeholder_spec(m))]
+
+
+def highlight(template: str, cfg) -> str:
+    """Escaped template with placeholders coloured, filters linked to the help page and
+    {abbr:key} linked to that abbreviation's row."""
+    out, pos = [], 0
+    for m in k.PLACEHOLDER_RE.finditer(template):
+        out.append(escape(template[pos:m.start()]))
+        ph = escape(m[0])
+        ph = re.sub(r"\|([a-z][a-z0-9_]*)", lambda f: f'|<a href="help.html#f-{f[1]}">{f[1]}</a>'
+                    if f[1] in k.FILTERS else f[0], ph)
+        if m["name"] == "abbr" and (spec := k.placeholder_spec(m)) and spec.strip().lower() in cfg.abbrs:
+            ph = ph.replace(escape(spec), f'<a href="#a-{escape(spec.strip().lower())}">{escape(spec)}</a>', 1)
+        out.append(f'<span class="ph">{ph}</span>')
+        pos = m.end()
+    out.append(escape(template[pos:]))
+    return "".join(out).replace("{/opt}", '<span class="ph">{/opt}</span>')
+
+
+def shorten(text: str) -> str:
+    return text if len(text) <= LIST_RESULT_MAX else text[:LIST_RESULT_MAX - 1] + "…"
+
+
 def list_page(cfg) -> str:
     clipboard = k.get_clipboard()
+    used_by: dict[str, list[str]] = {}
+    for abbr in cfg.abbrs.values():
+        for key in includes(abbr["text"]):
+            used_by.setdefault(key.lower(), []).append(abbr["key"])
     rows = []
+    counts = {kind: 0 for kind, _ in CHIPS[1:]}
     for abbr in sorted(cfg.abbrs.values(), key=lambda a: a["key"].lower()):
-        if k.needs_input(abbr["text"]):
-            labels = ", ".join(label for _, label, _ in k.ask_prompts(abbr["text"]))
-            result = f'<span class="muted">asks for {escape(labels)} when Enter is pressed</span>'
+        template = abbr["text"]
+        names = placeholder_names(k.with_includes(template))
+        kinds = set()
+        if names & {"arg", "input"}:
+            kinds.add("text")
+        if names & {"clipboard", "input"}:
+            kinds.add("clip")
+        if "cmd" in names or "|sh(" in template:
+            kinds.add("shell")
+        if abbr.get("format"):
+            kinds.add("fmt")
+        if k.is_lazy(abbr):
+            kinds.add("lazy")
+        sub = []  # notes under the result
+        if k.needs_input(template):
+            kinds.add("asks")
+            asked = ", ".join(f"{escape(label)} <span class=muted>({PROMPT_KINDS[name]}"
+                              + (f": {escape(', '.join(k.choices(default)))}" if name == "choose"
+                                 and default else "") + ")</span>"
+                              for name, label, default in k.ask_prompts(template))
+            result = f'<span class="muted">asks for</span> {asked}'
         elif abbr.get("lazy"):
             result = '<span class="muted">computed when Enter is pressed</span>'
         else:
-            text, ok = safe_expand(abbr["text"], cfg.cmd_timeout, clipboard)
-            if len(text) > LIST_RESULT_MAX:
-                text = text[:LIST_RESULT_MAX - 1] + "…"
-            result = f'<span class="result{"" if ok else " error"}">{escape(text)}</span>'
-        badge = '<span class="badge">on Enter</span>' if k.is_lazy(abbr) else ""
+            text, ok = safe_expand(template, cfg.cmd_timeout, clipboard)
+            if ok:
+                result = f'<span class="result">{escape(shorten(text))}</span>'
+            elif "clip" in kinds:  # depends on what was copied, e.g. |roman on a date
+                result = (f'<span class="muted">not for the current clipboard: '
+                          f"{escape(shorten(text))}</span>")
+            else:
+                kinds.add("error")
+                result = f'<span class="result error">{escape(shorten(text))}</span>'
+            if ok and abbr.get("format") == "markdown":
+                result += f'<div class="rendered">{k.markdown_to_html(text)}</div>'
+            if names & {"arg", "input"}:
+                example, ok2 = safe_expand(template, cfg.cmd_timeout, clipboard, SAMPLE_TEXT)
+                sub.append(f"with text: <code>{escape(typed(cfg, abbr['key'] + ' ' + SAMPLE_TEXT))}</code>"
+                           f' → <span class="result{"" if ok2 else " error"}">{escape(shorten(example))}</span>')
+        if "cursor" in names:
+            sub.append("pasting leaves the cursor at <code>{cursor}</code>")
+        for kind in kinds:
+            counts[kind] += 1
+
+        badges = "".join(f'<span class="badge{" warn" if b == "error" else ""}">{label}</span>'
+                         for b, label in (("lazy", "on Enter"), ("fmt", abbr.get("format", "")),
+                                          ("error", "error")) if b in kinds)
+        about = [escape(abbr.get("description", ""))]
+        if abbr.get("keywords"):
+            kw = abbr["keywords"]
+            kw = " ".join(kw) if isinstance(kw, list) else kw
+            about.append(f"<span class=sub>keywords: {escape(kw)}</span>")
+        if inc := includes(template):
+            about.append("<span class=sub>includes " + ", ".join(
+                f'<a href="#a-{escape(i.lower())}">{escape(i)}</a>' for i in inc) + "</span>")
+        if users := used_by.get(abbr["key"].lower()):
+            about.append("<span class=sub>used by " + ", ".join(
+                f'<a href="#a-{escape(u.lower())}">{escape(u)}</a>' for u in users) + "</span>")
+        result += "".join(f"<span class=sub>{n}</span>" for n in sub)
+        search = " ".join([abbr["key"], abbr.get("description", ""), str(abbr.get("keywords", "")),
+                           template]).lower()
         rows.append(
-            f"<tr><td class=nowrap><code>{escape(typed(cfg, abbr['key']))}</code>{badge}</td>"
-            f"<td>{escape(abbr.get('description', ''))}</td>"
-            f"<td><code>{escape(abbr['text'])}</code></td><td>{result}</td></tr>"
+            f'<tr id="a-{escape(abbr["key"].lower())}" data-kind="{" ".join(sorted(kinds))}"'
+            f' data-search="{escape(search)}">'
+            f'<td class=nowrap><code class=key title="Click to copy">{escape(typed(cfg, abbr["key"]))}</code>'
+            f"{badges}</td><td>{''.join(about)}</td>"
+            f"<td><code>{highlight(template, cfg)}</code></td><td>{result}</td></tr>"
         )
+
+    try:
+        modified = datetime.fromtimestamp(cfg.path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        modified = "?"
+    c = lambda s: f"<code>{escape(s)}</code>"
+    summary = (f'<p class="summary"><b>{len(rows)}</b> abbreviations: '
+               f"<b>{counts['text']}</b> take typed text, <b>{counts['asks']}</b> ask for input, "
+               f"<b>{counts['lazy']}</b> run on Enter, <b>{counts['fmt']}</b> formatted. "
+               f'<span class="muted">Keyword {c(cfg.prefix) if cfg.prefix else "none"} · '
+               f"{c(str(cfg.path))}, changed {modified}</span></p>")
+    if counts["error"]:
+        summary += (f'<p class="notice"><b>{counts["error"]}</b> abbreviation'
+                    f'{"s" if counts["error"] > 1 else ""} currently fail to expand: '
+                    '<a href="#" onclick="return chip(\'error\')">show them</a>.</p>')
+    chips = "".join(f'<button type=button data-chip="{kind}"{" class=on" if not kind else ""}'
+                    f' onclick="chip(\'{kind}\')">{label}'
+                    f'{f" <span class=muted>{counts[kind]}</span>" if kind else ""}</button>'
+                    for kind, label in CHIPS if not kind or counts[kind])
     body = f"""
-<input class="search" type="search" placeholder="Filter {len(rows)} abbreviations…" autofocus
-       oninput="filterRows(this.value)">
+{summary}
+<input class="search" type="search" placeholder="Search names, descriptions, keywords, templates…"
+       autofocus oninput="update()">
+<div class="chips">{chips}</div>
 <div class="scroll"><table id="abbrs">
 <tr><th>Type</th><th>Description</th><th>Template</th><th>Expansion now</th></tr>
 {"".join(rows)}
 </table></div>
 <p class="muted">Clipboard-based expansions use the clipboard as it was when this page was
-opened. Edit abbreviations with <code>{escape(typed(cfg if cfg.prefix else _default(cfg),
-"settings"))}</code>.</p>
+opened; examples use the typed text {c(SAMPLE_TEXT)}. Click an abbreviation to copy what to
+type. Edit abbreviations with {c(typed(cfg if cfg.prefix else _default(cfg), "settings"))}.</p>
 <script>
-function filterRows(q) {{
-  q = q.toLowerCase();
-  for (const row of document.querySelectorAll("#abbrs tr + tr"))
-    row.hidden = q && !row.textContent.toLowerCase().includes(q);
+let kind = "";
+function update() {{
+  const q = document.querySelector(".search").value.toLowerCase();
+  for (const row of document.querySelectorAll("#abbrs tr[data-kind]"))
+    row.hidden = (q && !row.dataset.search.includes(q)) ||
+                 (kind && !row.dataset.kind.split(" ").includes(kind));
 }}
+function chip(k) {{
+  kind = k;
+  for (const b of document.querySelectorAll(".chips button"))
+    b.classList.toggle("on", b.dataset.chip === k);
+  update();
+  return false;
+}}
+for (const code of document.querySelectorAll("code.key"))
+  code.addEventListener("click", () => {{
+    navigator.clipboard?.writeText(code.textContent);
+    code.title = "Copied";
+  }});
 </script>
 """
     return page("All Abbreviations", "list", body)
