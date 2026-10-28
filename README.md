@@ -12,6 +12,10 @@ This registers a D-Bus-activated runner (`io.github.nivaca.AbbrKRunner`) and cre
 `~/.config/krunner-abbr/abbreviations.toml` from the example. Re-run it after moving
 the project directory.
 
+Re-running `./install.sh` (e.g. after updating) never touches an existing
+`abbreviations.toml`, including a symlinked one; new example abbreviations are not merged
+in, see `abbreviations.toml` in the project for them.
+
 To remove it, run `./uninstall.sh`. Your abbreviations file is kept unless you add `--purge`.
 
 ## Settings

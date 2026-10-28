@@ -33,9 +33,15 @@ Name=$SERVICE
 Exec=/usr/bin/python3 $HERE/krunner_abbr.py
 EOF
 
-if [[ ! -e "$CONF/abbreviations.toml" ]]; then
-    cp "$HERE/abbreviations.toml" "$CONF/abbreviations.toml"
-    echo "Created $CONF/abbreviations.toml"
+# never touch an existing configuration: only create it when there is nothing at all
+# at that path (-L also catches a dangling symlink, e.g. into a not-yet-synced folder);
+# cp -n is a second guard against overwriting
+CONFIG="$CONF/abbreviations.toml"
+if [[ -e "$CONFIG" || -L "$CONFIG" ]]; then
+    echo "Kept your existing $CONFIG"
+else
+    cp -n "$HERE/abbreviations.toml" "$CONFIG"
+    echo "Created $CONFIG from the example"
 fi
 
 # restart a running instance so code changes take effect; D-Bus re-activates it on demand
