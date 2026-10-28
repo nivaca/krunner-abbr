@@ -8,6 +8,7 @@ are opened, so they always match what the runner actually does.
 
 import os
 import re
+import tomllib
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -116,6 +117,133 @@ PLACEHOLDER_DOCS = [
     ]),
 ]
 
+# an example of use for each placeholder, shown under its description
+PLACEHOLDER_USES = {
+    "{date}": 'ts = "Notes {date}.md" gives Notes 2026-10-28.md',
+    "{time}": 'For a log: "[{time}] "',
+    "{now}": "Good for file names and logs, or with a format: {now:%H:%M:%S}",
+    "{date:%d/%m/%Y}": "{date:%A, %-d %B %Y} gives Wednesday, 28 October 2026",
+    "{date+1d}": "{date+1w:%d/%m} next week, {date-1mo} one month ago, {now+90m:%H:%M} in an hour and a half",
+    "{date@es:%A %d de %B}": "Bogotá, {date@es:%-d de %B de %Y} for the head of a letter",
+    "{arg}": 'gh = "https://github.com/{arg}"; ex gh octocat gives https://github.com/octocat',
+    "{arg:default}": "{arg:Sir or Madam} when no name was written",
+    "{arg1} {arg2}…": 'cit = "{arg1}, \\textit{{{arg2}}} {arg3}"; ex cit Cicero Off. 1.3',
+    "{clipboard}": 'quote = "“{clipboard}”" puts the copied text between quotes',
+    "{clipboard:2}": "[{clipboard:2}]({clipboard}): copy a title, then a URL, and you have a Markdown link",
+    "{input}": "upper = \"{input|upper}\": ex upper hello, or only ex upper for the clipboard",
+    "{selection}": "Select a word with the mouse, then ex logeion with {selection|strip}",
+    "{ask:Label}": "Dear {ask:Name}, …",
+    "{asktext:Label}": "For the body of a short message",
+    "{choose:Label=a, b, c}": "{choose:Greeting=Dear colleague, Dear Sir or Madam, Hi}",
+    "{opt:Label}…{/opt}": "{opt:Mention CV=yes} My CV is attached as well.{/opt}",
+    "{askdate:Label}": "{askdate:Deadline|datefmt(%-d de %B, es)}",
+    "{abbr:name}": "{abbr:signoff} at the end of all your letters",
+    "{cursor}": "\\emph{{{cursor}}}: after pasting you write directly inside",
+    "{random:a, b, c}": "{random:heads, tails}, or random names for examples in class",
+    "{calc:2*(3+4)}": "Mostly with typed text: {input|calc}, and ex calc 12*1,5",
+    "{uuid}": "Unique names for files or test data",
+    "{env:USER}": "{env:HOME}/Documents for a path",
+    "{cmd:command}": "{cmd:uname -r}, or with the typed text: {cmd:date -d \"$ABBR_ARG\" +%F}",
+    "{{  }}": "\\cite{{{input}}} gives \\cite{key}",
+}
+
+# worked examples for the help page: (title, story, TOML, typed argument, clipboard,
+# answers or None, extra templates for {abbr:…}, note). The result is computed when the
+# page is built.
+RECIPES = [
+    ("Clean a paragraph copied from a PDF",
+     "Text copied from a PDF has the line breaks of the page, and words cut with a hyphen. "
+     "Copy it, write ex unwrap, press Enter, and paste.",
+     'unwrap = "{input|unhyphen|join|squeeze}"', "",
+     "The philo-\nsophy of the\nmiddle   ages", None, {}, None),
+    ("Put a title in the right case",
+     "For an English title, title knows the small words. For Spanish, titulo leaves only the "
+     "first word with capital.",
+     'title = "{input|title}"', "the name of the rose and other stories", "", None, {},
+     "For Spanish, the same with {input|titulo}: “historia de la filosofía en Colombia” → "
+     "“Historia de la filosofía en Colombia”."),
+    ("A date in Spanish for a letter",
+     "Your desktop can be in English; the date is in Spanish anyway.",
+     'fecha = "Bogotá, {date@es:%-d de %B de %Y}"', "", "", None, {}, None),
+    ("A citation of an ancient author",
+     "Three words, three places. The last placeholder takes all the rest of the text.",
+     'cit = "{arg1}, \\\\textit{{{arg2}}} {arg3}"', "Cicero Off. 1.3", "", None, {},
+     'For an author with two words, use quotes: ex cit "Pseudo Cicero" Rhet. 1.1'),
+    ("Look up a Latin word",
+     "action = \"open\" makes Enter open the result in the browser. Write the word, or copy "
+     "it before and write only ex logeion.",
+     'logeion = { text = "https://logeion.uchicago.edu/{input|strip|urlencode}", action = "open" }',
+     "amicitia", "", None, {}, "The same idea works for any site with the word in the address: "
+     "RAE (https://dle.rae.es/…), Perseus, a library catalogue…"),
+    ("LaTeX command with the cursor inside",
+     "When the abbreviation is pasted, the cursor goes back to {cursor}, here shown as ▮. "
+     "This needs pasting (the button, or enter_pastes = true).",
+     'emc = "\\\\emph{{{cursor}}}"', "", "", None, {}, None),
+    ("A letter that asks for the details",
+     "All the questions come in one window when you press Enter. The checkbox decides if the "
+     "sentence between {opt:…} and {/opt} stays.",
+     'cover = """Dear {ask:Name},\n\nplease find attached my application for the '
+     '{ask:Position} position.{opt:Mention CV=yes} My CV is attached as well.{/opt}\n\n'
+     '{abbr:signoff}"""',
+     "", "", {("ask", "Name"): "Dr. Smith", ("ask", "Position"): "lecturer",
+              ("opt", "Mention CV"): "1"},
+     {"signoff": "Best regards,\nYour Name"},
+     "Here the answers were Dr. Smith, lecturer, and the box ticked. signoff is another "
+     "abbreviation, included with {abbr:signoff}: change it once and all the letters change."),
+    ("Choose from a list",
+     "{choose} shows a list; the first option is selected at the start.",
+     'greet = "{choose:Greeting=Dear colleague, Dear Sir or Madam, Hi}"', "", "",
+     {("choose", "Greeting"): "Dear colleague"}, {}, None),
+    ("Pick a date in a calendar",
+     "{askdate} gives the date as 2026-12-24, and datefmt writes it as you want, also in "
+     "another language.",
+     'due = "Deadline: {askdate:Deadline|datefmt(%A %-d de %B, es)}"', "", "",
+     {("askdate", "Deadline"): "2026-12-24"}, {}, None),
+    ("Quick calculations",
+     "A comma works as decimal point. Only arithmetic is allowed.",
+     'calc = "{input|calc}"', "12*1,5 + 3", "", None, {}, None),
+    ("Normalize Latin before searching",
+     "Editions write Cæsar, poëta, vīvit; a search engine or a concordance wants caesar, "
+     "poeta, uiuit.",
+     'latin = "{input|latinize|lower}"', "Cæsar poëta vīvit", "", None, {}, None),
+    ("Quotes inside quotes",
+     "From Spanish style to English style, also the quotes inside, in one step.",
+     'g2d = "{input|quotes(guillemets, double, double, single)}"', "«dijo “hola” y se fue»",
+     "", None, {}, None),
+    ("A signature with format",
+     "With format = \"markdown\" the text arrives with bold, italics and links in Thunderbird "
+     "or LibreOffice. In a terminal it is pasted plain.",
+     'mdsig = { text = "**Best regards**,\\n*Your Name*\\n[example.org](https://example.org)", '
+     'format = "markdown" }', "", "", None, {}, None),
+]
+
+FAQ = [
+    ("I don't see the result in KRunner, only a description.",
+     "The abbreviation asks something ({ask}, {choose}…) or has lazy = true. It is computed "
+     "when you press Enter, and a notification shows the result."),
+    ("My command works in the terminal but not here.",
+     "While you write, a command has only cmd_timeout seconds (2 by default). For slow commands "
+     "put lazy = true: on Enter they have 20 seconds. Also, a placeholder cannot contain { or }; "
+     "put such a command in a script."),
+    ("How do I write a brace that is not a placeholder?",
+     "Double it: {{ gives {, and }} gives }. So \\emph{{{input}}} gives \\emph{text}."),
+    ("Can an abbreviation have two names, for example in Spanish and English?",
+     'Yes, with aliases = ["hoy"]. Or use keywords, then also the description words find it.'),
+    ("Can I use my abbreviations on two computers?",
+     "Put abbreviations.toml in a synchronized folder (Dropbox, Nextcloud…) and make "
+     "~/.config/krunner-abbr/abbreviations.toml a symbolic link to it. install.sh never "
+     "replaces a link. The usage counts stay local."),
+    ("I made a mistake in the file and now nothing works.",
+     "The runner keeps the last version that was correct, so it continues working. Open "
+     "the settings dialog: it shows the error with the line. There is also "
+     "abbreviations.toml.bak, the version before the last save of the dialog."),
+    ("Why is a result different when I paste in a terminal?",
+     "Terminals get Ctrl+Shift+V instead of Ctrl+V, and plain text instead of formatted text. "
+     "{cursor} works there too."),
+    ("How do I stop an abbreviation from appearing, without deleting it?",
+     'Give it a group, for example group = "Old", and put "Old" in disabled_groups.'),
+]
+
 # filter -> group on the help page; others go to "Other"
 FILTER_GROUPS = {
     "Case of letters": "upper lower title titulo sentence swapcase capitalize alternating randomcase",
@@ -211,6 +339,21 @@ td.nowrap { white-space: nowrap; }
 .sub { display: block; font-size: 13px; color: var(--muted); margin-top: 3px; }
 .sub code { font-size: 12px; }
 .badge.warn { color: var(--error); }
+pre.snippet {
+  font: 13px/1.45 ui-monospace, "JetBrains Mono", "Noto Sans Mono", monospace;
+  background: var(--code-bg); padding: 8px 12px; border-radius: 6px; margin: 8px 0;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.recipe {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 16px 12px; margin: 14px 0;
+}
+.recipe h3 { font-size: 15px; margin: 12px 0 4px; font-weight: 650; }
+.recipe p { margin: 6px 0; }
+.label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+dl.faq dt { font-weight: 650; margin-top: 14px; }
+dl.faq dd { margin: 4px 0 0 0; }
+ol.steps li { margin-bottom: 10px; }
 .rendered { margin-top: 6px; padding: 6px 10px; border-left: 3px solid var(--border); }
 .rendered > :first-child { margin-top: 0; } .rendered > :last-child { margin-bottom: 0; }
 td code.key { cursor: copy; }
@@ -265,14 +408,48 @@ def safe_expand(template: str, timeout: float, clipboard: str, arg: str = "") ->
         return str(e), False
 
 
+def recipe_html(cfg, recipe) -> str:
+    """One worked example: the TOML, what you write, and the result computed now."""
+    title, story, toml, arg, clipboard, answers, extra, note = recipe
+    c = lambda s: f"<code>{escape(s)}</code>"
+    key, value = next(iter(tomllib.loads("[abbr]\n" + toml)["abbr"].items()))
+    abbr = value if isinstance(value, dict) else {"text": value}
+    saved = dict(k.ABBR_TEXTS)
+    k.ABBR_TEXTS.update(extra)  # for {abbr:…} in the example; restored below
+    try:
+        text = k.expand(abbr["text"], arg, cfg.cmd_timeout, clipboard, answers, keep_cursor=True)
+        text, ok = text.replace(k.CURSOR_MARK, "▮"), True
+    except Exception as e:
+        text, ok = str(e), False
+    finally:
+        k.ABBR_TEXTS.clear()
+        k.ABBR_TEXTS.update(saved)
+    before = []
+    if clipboard:
+        before.append(f'<p><span class=label>On the clipboard</span></p><pre class="snippet">{escape(clipboard)}</pre>')
+    write = typed(cfg, key + (" " + arg if arg else ""))
+    action = "Enter opens" if abbr.get("action") == "open" else "you get"
+    result = f'<pre class="snippet{"" if ok else " error"}">{escape(text)}</pre>'
+    if ok and abbr.get("format") == "markdown":
+        result += f'<div class="rendered">{k.markdown_to_html(text)}</div>'
+    return f"""<div class="recipe"><h3>{escape(title)}</h3>
+<p>{escape(story)}</p>
+<pre class="snippet">{escape(toml)}</pre>
+{"".join(before)}<p>You write {c(write)}, {action}:</p>
+{result}
+{f"<p class=muted>{escape(note)}</p>" if note else ""}</div>"""
+
+
 def help_page(cfg) -> str:
     c = lambda s: f"<code>{escape(s)}</code>"
     t = lambda word: c(typed(cfg, word))  # an abbreviation as typed in KRunner
     b = lambda word: c(typed(cfg if cfg.prefix else _default(cfg), word))  # a built-in command
-    toc = """<nav class="toc"><a href="#using">First steps</a><a href="#commands">Built-in commands</a>
+    toc = """<nav class="toc"><a href="#using">First steps</a><a href="#first">Your first abbreviation</a>
+<a href="#recipes">Use cases</a><a href="#commands">Built-in commands</a>
 <a href="#pasting">Copying and pasting</a><a href="#placeholders">Placeholders</a>
 <a href="#prompts">Prompts</a><a href="#filters">Filters</a><a href="#quotes">Quote styles</a>
-<a href="#config">Configuration</a><a href="#files">Files</a><a href="#problems">Problems</a>
+<a href="#config">Configuration</a><a href="#files">Files</a><a href="#faq">Questions</a>
+<a href="#problems">Problems</a>
 <a href="list.html">All abbreviations →</a></nav>"""
     keyword = (f"Your keyword is {c(cfg.prefix)}." if cfg.prefix else
                "You don't use a keyword, so the abbreviations match directly.")
@@ -296,6 +473,40 @@ clipboard. {keyword} The names are not case-sensitive.</p>
       what was copied, and if you cancel the questions nothing is copied.</li>
   <li>After each copy a small notification shows the text{"" if cfg.notify else " (turned off now, except for errors and the results computed on Enter)"}.</li>
 </ul>
+
+<h2 id="first">Your first abbreviation, step by step</h2>
+<p>The fastest way is the settings dialog ({b("settings")}, then the tab Abbreviations and
+the button <b>Add</b>). Here the same with the file, so you see what happens inside.</p>
+<ol class="steps">
+  <li>Open {c(str(k.CONFIG_FILE))} with any text editor. (Or write {t("odf")} in KRunner,
+      if you have it, to open the folder.)</li>
+  <li>Under {c("[abbr]")}, before the first {c("[abbr.something]")} table, add a line:
+      <pre class="snippet">hi = "Hello, how are you?"</pre>
+      Save. You don't need to restart anything.</li>
+  <li>In KRunner write {t("hi")}. The result is there already, press Enter and paste
+      it where you want.</li>
+  <li>Now something that changes every time. A placeholder between braces:
+      <pre class="snippet">today = "Today is {{date:%A}}."</pre>
+      {t("today")} gives <span class=result>{escape(safe_expand("Today is {date:%A}.", cfg.cmd_timeout, "")[0])}</span></li>
+  <li>With text written after it, and a filter:
+      <pre class="snippet">shout = "{{input|upper}}!"</pre>
+      {t("shout hello")} gives <span class=result>HELLO!</span>; only {t("shout")} takes
+      the clipboard.</li>
+  <li>When you want a description, an icon or other options, use a table at the end of the file:
+      <pre class="snippet">[abbr.shout]
+text = "{{input|upper}}!"
+description = "Shout the text"
+icon = "format-text-uppercase"
+aliases = ["loud"]</pre></li>
+</ol>
+<p>That's all the basic. The <a href="#recipes">use cases</a> below show more complete things,
+and the tables after them have every detail.</p>
+
+<h2 id="recipes">Use cases</h2>
+<p>Real examples, each one with the TOML, what you write in KRunner and the result. The results
+are computed in the moment this page was opened, with the real code, so they are exact (only the
+answers to the questions are invented). Most of them are in the example file too.</p>
+{"".join(recipe_html(cfg, r) for r in RECIPES)}
 
 <h2 id="commands">Built-in commands</h2>
 <p>These work always, also if you don't use a keyword.</p>
@@ -334,7 +545,9 @@ Alacritty, foot, WezTerm, Ghostty, GNOME Terminal, Ptyxis, Tilix, xterm and some
             if example:
                 result, ok = safe_expand(example, cfg.cmd_timeout, "")
                 now = f'<span class="result{"" if ok else " error"}">{escape(result)}</span>'
-            rows.append(f"<tr><td class=nowrap>{c(syntax)}</td><td>{escape(desc)}</td>"
+            use = PLACEHOLDER_USES.get(syntax)
+            use = f'<span class=sub>Example: {c(use)}</span>' if use else ""
+            rows.append(f"<tr><td class=nowrap>{c(syntax)}</td><td>{escape(desc)}{use}</td>"
                         f"<td>{now}</td></tr>")
         sections.append(f'<tr class=group><td colspan=3>{escape(group)}</td></tr>{"".join(rows)}')
     placeholders = f"""
@@ -469,6 +682,11 @@ them converted, and with {c("--write")} they are added to your file.</p>
 <tr><td>{c(str(k.USAGE_FILE))}</td><td>How many times and when you used each abbreviation.</td></tr>
 <tr><td>{c(str(CACHE_DIR))}</td><td>This page, the list page, and a small KWin script for knowing the active window.</td></tr>
 </table></div>
+
+<h2 id="faq">Questions</h2>
+<dl class="faq">
+{"".join(f"<dt>{escape(q)}</dt><dd>{escape(a)}</dd>" for q, a in FAQ)}
+</dl>
 
 <h2 id="problems">Problems</h2>
 <ul>
