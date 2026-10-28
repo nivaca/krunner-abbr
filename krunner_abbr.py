@@ -33,6 +33,8 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
+__version__ = "0.1"
+
 SERVICE = "io.github.nivaca.AbbrKRunner"
 OBJPATH = "/runner"
 IFACE = "org.kde.krunner1"
@@ -1484,12 +1486,26 @@ def case_icon(name: str) -> str:
     return "format-text-capitalize" if CASE_FILTERS.index(name) < 7 else "format-text-code"
 
 
+def ensure_config() -> None:
+    """Create the configuration from the example on the first run, as install.sh does
+    (an RPM can't write into home folders). Never touches an existing file or symlink."""
+    if CONFIG_FILE.exists() or CONFIG_FILE.is_symlink():
+        return
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with CONFIG_FILE.open("x") as f:
+            f.write(EXAMPLE_CONFIG.read_text())
+    except OSError as e:
+        print(f"cannot create {CONFIG_FILE}: {e}", file=sys.stderr)
+
+
 def run_service() -> None:
     import dbus
     import dbus.service
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository import GLib
 
+    ensure_config()
     cfg = Config(CONFIG_FILE)
     usage = Usage()
 

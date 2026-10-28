@@ -19,6 +19,7 @@ come from there, but it is general.
 
 - [Requirements](#requirements)
 - [Installing, updating and removing](#installing-updating-and-removing)
+- [Fedora package](#fedora-package)
 - [First steps](#first-steps)
 - [Built-in commands](#built-in-commands)
 - [Copying and pasting](#copying-and-pasting)
@@ -93,6 +94,34 @@ again on the next query:
 
     pkill -f krunner_abbr.py
 
+
+## Fedora package
+
+It is possible to make an RPM, for installing it like any other program:
+
+    sudo dnf install rpm-build
+    ./build_rpm.py
+    sudo dnf install build/rpm/krunner-abbr-0.1-1.fc44.noarch.rpm
+
+The script takes the version from `__version__` in `krunner_abbr.py` and the files of the
+git folder (also the ones not committed yet), and leaves the packages in `build/rpm/`.
+Other options:
+
+- `./build_rpm.py --srpm` makes only the source package.
+- `./build_rpm.py --release 2` for a second package of the same version.
+- `./build_rpm.py --mock fedora-44-x86_64` builds it again in a clean system with `mock`,
+  the best test that no dependency is missing.
+- `./build_rpm.py --copr nivaca/krunner-abbr` sends it to [Copr](https://copr.fedorainfracloud.org),
+  after you created the project there and configured `copr-cli`. Then other people install
+  it with `sudo dnf copr enable nivaca/krunner-abbr` and `sudo dnf install krunner-abbr`.
+
+The package puts the program in `/usr/share/krunner-abbr`, and a command
+`krunner-abbr` (`krunner-abbr --list`, `krunner-abbr settings`…). Your configuration is
+created the first time the runner starts, from the example, and only when there is no
+file (or link) yet. The files for the package are in the folder `packaging/`.
+
+Note: use the package **or** `install.sh`, not both. If both are installed, the copy of
+`install.sh` in your home folder wins; run `./uninstall.sh` before installing the RPM.
 
 ## First steps
 

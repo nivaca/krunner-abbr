@@ -1,0 +1,7 @@
+#!/bin/sh
+# Start the runner, or pass options to it: krunner-abbr --list, --expand ex isod, …
+# "krunner-abbr settings" opens the settings dialog.
+if [ "$1" = settings ]; then
+    exec /usr/bin/python3 /usr/share/krunner-abbr/krunner_abbr_settings.py
+fi
+exec /usr/bin/python3 /usr/share/krunner-abbr/krunner_abbr.py "$@"

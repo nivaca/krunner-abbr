@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=Abbreviations
+Comment=Expand abbreviations and copy them to the clipboard
+Icon=edit-paste
+Type=Service
+X-KDE-PluginInfo-Author=Nicolas Vaughan
+X-KDE-PluginInfo-Name=krunner-abbr
+X-KDE-PluginInfo-Version=__VERSION__
+X-KDE-PluginInfo-License=GPL-3.0-or-later
+X-KDE-PluginInfo-EnabledByDefault=true
+X-Plasma-API=DBus
+X-Plasma-API-Minimum-Version=2.0
+X-Plasma-DBusRunner-Service=io.github.nivaca.AbbrKRunner
+X-Plasma-DBusRunner-Path=/runner
+X-Plasma-Runner-Min-Letter-Count=2
