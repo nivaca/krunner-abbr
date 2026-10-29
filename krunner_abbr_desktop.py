@@ -2,11 +2,14 @@
 # Copyright (C) 2026 Nicolas Vaughan
 """Desktop plumbing: the clipboard, pasting into the focused window, notifications."""
 
+import itertools
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from pathlib import Path
 
 
 # ---------------------------------------------------------------- clipboard
@@ -84,7 +87,7 @@ def set_clipboard(text: str, html_text: str | None = None) -> None:
     raise RuntimeError("no clipboard backend available (Klipper, wl-copy, xclip)")
 
 
-# key name -> (evdev code for ydotool, wtype name, xdotool name)
+# key name -> (evdev code for the portal and ydotool, wtype name, xdotool name)
 KEYS = {
     "ctrl": (29, "ctrl", "ctrl"), "shift": (42, "shift", "shift"), "alt": (56, "alt", "alt"),
     "super": (125, "logo", "super"), "v": (47, "v", "v"), "insert": (110, "Insert", "Insert"),
@@ -120,19 +123,184 @@ def paste_commands(combo: str = "ctrl+v", back: int = 0) -> list[list[str]]:
     return [c for c in cmds if shutil.which(c[0])]
 
 
+# ---------------------------------------------------------------- RemoteDesktop portal
+
+
+PORTAL = "org.freedesktop.portal.Desktop"
+PORTAL_PATH = "/org/freedesktop/portal/desktop"
+APP_ID = "io.github.nivaca.AbbrKRunner"
+PORTAL_TOKEN = (Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+                / "krunner-abbr" / "portal-token")
+
+
+class Portal:
+    """Presses keys through the RemoteDesktop portal: KWin itself, no root, no extra tools.
+
+    Plasma asks once; the answer is kept with a restore token (each one works once, so
+    the new one is saved every time). The session stays open a while, so quick pastes
+    don't start a new one. The portal answers with signals, so this needs the GLib main
+    loop running in another thread.
+    """
+    IDLE = 60  # seconds before an unused session is closed
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.session = None
+        self.refused = False
+        self.timer = None
+        self.tokens = itertools.count(1)
+        self.registered = False
+
+    def _options(self, **kw):
+        import dbus
+
+        return dbus.Dictionary({"handle_token": f"abbr{os.getpid()}_{next(self.tokens)}", **kw},
+                               "sv")
+
+    def _request(self, method: str, *args, timeout: float = 10) -> dict:
+        """Call a method that answers through a Request object; return its results."""
+        import dbus
+
+        bus = dbus.SessionBus()
+        options = args[-1]
+        sender = bus.get_unique_name()[1:].replace(".", "_")
+        path = f"{PORTAL_PATH}/request/{sender}/{options['handle_token']}"
+        done, answer = threading.Event(), {}
+
+        def response(code, results):
+            answer.update(code=int(code), results=results)
+            done.set()
+
+        # subscribe before calling, or a quick answer is lost
+        match = bus.add_signal_receiver(response, "Response", "org.freedesktop.portal.Request",
+                                        path=path)
+        try:
+            bus.get_object(PORTAL, PORTAL_PATH).get_dbus_method(
+                method, "org.freedesktop.portal.RemoteDesktop")(*args)
+            if not done.wait(timeout):
+                raise RuntimeError(f"no answer from the portal ({method})")
+        finally:
+            match.remove()
+        if answer["code"] == 1:
+            raise PermissionError("remote control was not allowed")
+        if answer["code"]:
+            raise RuntimeError(f"the portal refused {method}")
+        return answer["results"]
+
+    def _start(self) -> None:
+        import dbus
+
+        bus = dbus.SessionBus()
+        if not self.registered:  # a name in the dialog and for the saved permission
+            self.registered = True
+            try:
+                bus.get_object(PORTAL, PORTAL_PATH).get_dbus_method(
+                    "Register", "org.freedesktop.host.portal.Registry")(
+                    APP_ID, dbus.Dictionary({}, "sv"))
+            except Exception as e:
+                print(f"portal registry: {e}", file=sys.stderr)
+        token = None
+        options = self._options(session_handle_token=f"abbr{os.getpid()}_s{next(self.tokens)}")
+        session = dbus.ObjectPath(self._request("CreateSession", options)["session_handle"])
+        try:
+            token = PORTAL_TOKEN.read_text().strip()
+        except OSError:
+            pass
+        extra = {"restore_token": token} if token else {}
+        self._request("SelectDevices", session,
+                      self._options(types=dbus.UInt32(1), persist_mode=dbus.UInt32(2), **extra))
+        # the first time, Plasma asks: give the user time to answer
+        results = self._request("Start", session, "", self._options(), timeout=120)
+        if not int(results.get("devices", 0)) & 1:
+            raise PermissionError("the portal gave no keyboard")
+        if results.get("restore_token"):
+            PORTAL_TOKEN.parent.mkdir(parents=True, exist_ok=True)
+            PORTAL_TOKEN.write_text(str(results["restore_token"]))
+            PORTAL_TOKEN.chmod(0o600)
+        handle = bus.add_signal_receiver(lambda *a: self._forget(session), "Closed",
+                                         "org.freedesktop.portal.Session", path=session)
+        self.session = (session, handle)
+
+    def _forget(self, session) -> None:
+        if self.session and self.session[0] == session:
+            self.session[1].remove()
+            self.session = None
+
+    def _close(self) -> None:
+        import dbus
+
+        with self.lock:
+            if self.session is None:
+                return
+            session = self.session[0]
+            self._forget(session)
+            try:
+                dbus.SessionBus().get_object(PORTAL, session).get_dbus_method(
+                    "Close", "org.freedesktop.portal.Session")()
+            except Exception:
+                pass
+
+    def press(self, codes: list[tuple[int, bool]]) -> None:
+        """Send (evdev keycode, pressed) events to the focused window."""
+        import dbus
+
+        if self.refused:
+            raise PermissionError("remote control was not allowed; restart the runner to be "
+                                  "asked again")
+        with self.lock:
+            if self.timer:
+                self.timer.cancel()
+            try:
+                if self.session is None:
+                    self._start()
+            except PermissionError:
+                self.refused = True
+                raise
+            notify_key = dbus.SessionBus().get_object(PORTAL, PORTAL_PATH).get_dbus_method(
+                "NotifyKeyboardKeycode", "org.freedesktop.portal.RemoteDesktop")
+            try:
+                for code, pressed in codes:
+                    notify_key(self.session[0], dbus.Dictionary({}, "sv"), dbus.Int32(code),
+                               dbus.UInt32(1 if pressed else 0))
+                    time.sleep(0.01)
+            except Exception:
+                self.session = None  # perhaps closed under us: start again next time
+                raise
+            self.timer = threading.Timer(self.IDLE, self._close)
+            self.timer.daemon = True
+            self.timer.start()
+
+
+portal = Portal()
+
+
+def key_events(combo: str = "ctrl+v", back: int = 0) -> list[tuple[int, bool]]:
+    """(evdev keycode, pressed) events for combo, then Left back times."""
+    mods, key = parse_keys(combo)
+    down = [KEYS[m][0] for m in mods] + [KEYS[key][0]]
+    return ([(c, True) for c in down] + [(c, False) for c in reversed(down)]
+            + [(KEYS["left"][0], p) for _ in range(back) for p in (True, False)])
+
+
 def paste_clipboard(combo: str = "ctrl+v", back: int = 0) -> None:
     """Press combo (Ctrl+V) in the focused window, then move the cursor back characters.
 
-    Raises RuntimeError if no tool can.
+    The RemoteDesktop portal comes first; the external tools are a fallback.
+    Raises RuntimeError if nothing can.
     """
+    events = key_events(combo, back)
     errors = []
+    try:
+        portal.press(events)
+        return
+    except Exception as e:
+        errors.append(f"portal: {e}")
     for cmd in paste_commands(combo, back):
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
             return
         errors.append(f"{cmd[0]}: {(r.stderr or r.stdout).strip() or r.returncode}")
-    raise RuntimeError("; ".join(errors) or
-                       "install ydotool (and enable its service) or wtype to paste automatically")
+    raise RuntimeError("; ".join(errors))
 
 # ---------------------------------------------------------------- notifications
 

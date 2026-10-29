@@ -55,7 +55,7 @@ Optional things, only for some functions:
 |---|---|
 | PySide6 (`python3-pyside6`) | The settings dialog, and the form that shows all the questions of an abbreviation in one window. Without it, the questions come one by one with `kdialog`. |
 | `kdialog` | Questions when PySide6 is not there. |
-| `ydotool` (with its service) or `wtype` | Pasting automatically. Without one of them, the text is only copied. |
+| `ydotool` (with its service) | Pasting, only if the Plasma portal does not work (see below). |
 | `wl-clipboard` | Formatted text (HTML) on the clipboard, and `{selection}`. |
 | PyYAML (`python3-pyyaml`) | Importing espanso files. |
 | `curl` | Only for the bundled examples that download BibTeX. |
@@ -180,8 +180,13 @@ If you don't use any keyword (empty `prefix`), these commands still work with `e
 ## Copying and pasting
 
 By default, Enter **copies** the result. To **paste** it too, the runner must press
-Ctrl+V for you in the window that you were using before KRunner. On Wayland this needs
-an extra program. The best is `ydotool`:
+Ctrl+V for you in the window that you were using before KRunner. For this it uses the
+"remote control" portal of Plasma, so nothing extra is needed. The first time you paste,
+Plasma asks if Abbreviations can control the keyboard: say yes and choose to remember it.
+The permission is saved in `~/.local/state/krunner-abbr/portal-token`; delete this file
+to be asked again.
+
+If the portal does not work (or you said no), the runner tries `ydotool`:
 
     sudo dnf install ydotool
     sudo systemctl enable --now ydotool
@@ -626,8 +631,9 @@ With `--expand`, the prompts are asked in the terminal.
 
 ## Known limits and problems
 
-- **Nothing is pasted.** Check that `ydotool` is installed and its service is running
-  (`systemctl status ydotool`). The notification says what failed.
+- **Nothing is pasted.** The notification says what failed. If you said no to the
+  Plasma question, restart the runner (`pkill -f krunner_abbr`) to be asked again, or
+  install `ydotool` and enable its service.
 - **In a terminal, the paste does nothing.** Probably the terminal is not in the list;
   add it in `[paste_keys]` with `ctrl+shift+v`.
 - **HTML tags appear when pasting.** It is the limit of formatted text on Wayland,

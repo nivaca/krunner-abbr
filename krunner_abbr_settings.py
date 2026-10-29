@@ -331,8 +331,8 @@ class SettingsDialog(QDialog):
         form.addRow("Enter:", self.enter_pastes_check)
         form.addRow("", self._hint(
             "Enter copies the expansion and presses Ctrl+V in the window you came from; "
-            "a button on each match copies without pasting. Needs <code>ydotool</code> "
-            "(with its service running) or <code>wtype</code>; without one, Enter only copies."
+            "a button on each match copies without pasting. The first time, Plasma asks "
+            "permission to control the keyboard; if it can't, <code>ydotool</code> is used."
         ))
 
         self.rank_check = QCheckBox("Rank abbreviations you use often and recently higher")

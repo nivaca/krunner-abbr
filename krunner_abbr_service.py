@@ -9,7 +9,7 @@ from pathlib import Path
 
 import dbus
 import dbus.service
-from dbus.mainloop.glib import DBusGMainLoop
+from dbus.mainloop.glib import DBusGMainLoop, threads_init
 from gi.repository import GLib
 
 from krunner_abbr_config import CONFIG_FILE, Config, Usage, ensure_config
@@ -53,6 +53,7 @@ def notify_copied(abbr: dict, text: str, verb: str = "Copied") -> None:
 class Runner(dbus.service.Object):
     def __init__(self, cfg: Config, usage: Usage):
         self.cfg, self.usage = cfg, usage
+        threads_init()  # pasting talks to the portal from a thread
         DBusGMainLoop(set_as_default=True)
         # the Object keeps the BusName alive; storing it ourselves as self._name would be
         # clobbered by Object.__init__, releasing the name immediately

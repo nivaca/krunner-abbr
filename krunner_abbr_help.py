@@ -523,11 +523,11 @@ answers to the questions are invented). Most of them are in the example file too
 <h2 id="pasting">Copying and pasting</h2>
 <p>Now, Enter <b>{"copies and pastes" if cfg.enter_pastes else "copies"}</b> the result
 ({c("enter_pastes = " + ("true" if cfg.enter_pastes else "false"))}). For pasting, the
-runner presses Ctrl+V for you in the window where you were before KRunner. On Wayland this
-needs {c("ydotool")} with its service running
-({c("sudo dnf install ydotool && sudo systemctl enable --now ydotool")}); {c("wtype")} works
-in some compositors but normally not in KWin. If nothing can paste, the text stays on the
-clipboard and a notification says why.</p>
+runner presses Ctrl+V for you in the window where you were before KRunner. It uses the
+remote control portal of Plasma: the first time, Plasma asks for permission (say yes, and
+remember it). If the portal does not work, it tries {c("ydotool")} with its service running
+({c("sudo dnf install ydotool && sudo systemctl enable --now ydotool")}). If nothing can
+paste, the text stays on the clipboard and a notification says why.</p>
 <p>Terminals paste with Ctrl+Shift+V. Before pasting, the runner asks KWin which window has
 the focus, and uses Ctrl+Shift+V for the terminals that it knows (Konsole, Yakuake, kitty,
 Alacritty, foot, WezTerm, Ghostty, GNOME Terminal, Ptyxis, Tilix, xterm and some more). Other programs go in a
@@ -690,8 +690,9 @@ them converted, and with {c("--write")} they are added to your file.</p>
 
 <h2 id="problems">Problems</h2>
 <ul>
-  <li><b>Nothing is pasted.</b> Check that {c("ydotool")} is installed and that its service is
-      running ({c("systemctl status ydotool")}). The notification says what failed.</li>
+  <li><b>Nothing is pasted.</b> The notification says what failed. If you said no to the
+      Plasma question, restart the runner to be asked again, or install {c("ydotool")} and
+      enable its service.</li>
   <li><b>In a terminal the paste does nothing.</b> Probably the terminal is not known; add it to
       {c("[paste_keys]")} with {c("ctrl+shift+v")}.</li>
   <li><b>HTML tags appear when pasting.</b> This is the limit of formatted text on Wayland,
