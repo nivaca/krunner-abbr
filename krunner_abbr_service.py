@@ -317,6 +317,7 @@ class Runner(dbus.service.Object):
 
         def with_window(apps: list[str]):
             keys = next((self.cfg.paste_keys[a] for a in apps if a in self.cfg.paste_keys), "ctrl+v")
+            print(f"paste: window {apps or 'unknown'} -> {keys}", file=sys.stderr, flush=True)
             rich = html_text is not None and keys == "ctrl+v"  # terminals get plain text
             set_clipboard(text, html_text if rich else None)
             threading.Thread(target=work, args=(keys, 0 if rich else back),

@@ -292,12 +292,14 @@ def paste_clipboard(combo: str = "ctrl+v", back: int = 0) -> None:
     errors = []
     try:
         portal.press(events)
+        print(f"paste: {combo} sent through the portal", file=sys.stderr, flush=True)
         return
     except Exception as e:
         errors.append(f"portal: {e}")
     for cmd in paste_commands(combo, back):
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
+            print(f"paste: {combo} sent with {cmd[0]}", file=sys.stderr, flush=True)
             return
         errors.append(f"{cmd[0]}: {(r.stderr or r.stdout).strip() or r.returncode}")
     raise RuntimeError("; ".join(errors))
