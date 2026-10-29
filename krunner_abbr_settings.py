@@ -22,7 +22,7 @@ from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
+    QPlainTextEdit, QPushButton, QSizePolicy, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
     QStyleOptionViewItem, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -180,6 +180,18 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------- dialog
+
+
+def expanding(label: QLabel) -> QLabel:
+    """Let a word-wrapped label take the whole width of a form row.
+
+    Breeze's form layouts only widen fields that ask for it; a wrapped label left at its
+    narrow size hint gets too little height, and its text runs into the next row.
+    """
+    policy = label.sizePolicy()  # keeps heightForWidth, which wrapping needs
+    policy.setHorizontalPolicy(QSizePolicy.Expanding)
+    label.setSizePolicy(policy)
+    return label
 
 
 class EntryDelegate(QStyledItemDelegate):
@@ -426,7 +438,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(self.editor)
         form.addRow("Abbreviation:", self.key_edit)
         # what would stop saving, shown while editing instead of only on Save
-        self.problem_label = QLabel(wordWrap=True)
+        self.problem_label = expanding(QLabel(wordWrap=True))
         self.problem_label.setStyleSheet("color: palette(link-visited);")
         form.addRow("", self.problem_label)
         form.addRow("Description:", self.desc_edit)
@@ -488,7 +500,7 @@ class SettingsDialog(QDialog):
     def _hint(html: str) -> QLabel:
         label = QLabel(html, wordWrap=True)
         label.setEnabled(False)  # renders in the theme's dimmed text colour
-        return label
+        return expanding(label)
 
     # ---- load / save
 
