@@ -78,7 +78,7 @@ def builtin_matches(cfg: Config, query: str) -> list[tuple[str, int]]:
         if rest == word:
             matches.append((word, HIGHEST))
         elif not rest and cfg.prefix:
-            matches.append((word, LOW))  # listed along with all abbreviations
+            matches.append((word, HIGH))  # listed along with all abbreviations
         elif cfg.min_prefix_chars and len(rest) >= cfg.min_prefix_chars and word.startswith(rest):
             matches.append((word, LOW))
     return matches
@@ -198,6 +198,11 @@ def one_edit_apart(a: str, b: str) -> bool:
     short, long = sorted((a, b), key=len)
     i = next((i for i, (x, y) in enumerate(zip(short, long)) if x != y), len(short))
     return short[i:] == long[i + 1:]
+
+
+def keyword_alone(cfg: Config, query: str) -> bool:
+    """True if query is only the keyword: the list of every abbreviation."""
+    return bool(cfg.prefix) and strip_trigger(query.strip(), cfg.prefix) == ""
 
 
 def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:

@@ -21,8 +21,8 @@ from krunner_abbr_match import (BUILTIN_ID, BUILTINS, CASE_ID, CASE_WORD, CLIP_I
                                 CLIP_WORD, FILTER_ICON, FILTER_ID, HIGH, HIGHEST, LAZY_TIMEOUT, LOW,
                                 apply_case, builtin_matches, case_icon, case_query, case_style,
                                 case_variants, chain_query, complete_chain, find_matches,
-                                match_reason, open_settings, run_builtin, run_chain, typed_key,
-                                word_query)
+                                keyword_alone, match_reason, open_settings, run_builtin, run_chain,
+                                typed_key, word_query)
 from krunner_abbr_template import collect_answers, expand, is_lazy, needs_input, split_cursor
 
 SERVICE = "io.github.nivaca.AbbrKRunner"
@@ -99,6 +99,8 @@ class Runner(dbus.service.Object):
                   for a, _, _ in matches}
         top = max(scores.values(), default=0.0) or 1.0
         typed = typed_key(self.cfg, query)
+        # the keyword alone asks for the list: put it above other runners' results
+        listing = keyword_alone(self.cfg, query)
         for abbr, arg, category in matches:
             style = case_style(typed) if abbr.get("propagate_case") and category == HIGHEST else ""
             match_id = f"{abbr['key']}\x1f{arg}\x1f{style}"
@@ -109,6 +111,7 @@ class Runner(dbus.service.Object):
             buttons = self.actions("template", "edit") if opens else self.abbr_actions()
             group = abbr.get("group") or "Abbreviations"
             note = "matches the clipboard · " if category == HIGH else ""
+            shown_category = {HIGH: HIGHEST, LOW: HIGH}[category] if listing else category
             # the name, and why it matched when the name doesn't show it (alias, typo…)
             name = " · ".join(filter(None, [abbr["key"], match_reason(self.cfg, abbr, query)]))
             if is_lazy(abbr):  # computed in Run: slow commands, or prompts for input
@@ -119,7 +122,7 @@ class Runner(dbus.service.Object):
                     hint = f"last: {one_line(last, 60)} · {hint}"
                 results.append((
                     match_id, f"{label}: {arg}" if arg else label,
-                    abbr.get("icon", "system-run"), category, relevance,
+                    abbr.get("icon", "system-run"), shown_category, relevance,
                     {"subtext": f"{note}{name} · {hint}", "category": group,
                      "actions": buttons},
                 ))
@@ -129,7 +132,7 @@ class Runner(dbus.service.Object):
                                   style)
             except Exception as e:
                 results.append((
-                    match_id, f"{abbr['key']}: {e}", "dialog-error", category, 0.1,
+                    match_id, f"{abbr['key']}: {e}", "dialog-error", shown_category, 0.1,
                     {"subtext": "abbreviation error", "actions": self.actions("edit")},
                 ))
                 continue
@@ -138,7 +141,7 @@ class Runner(dbus.service.Object):
             subtext = f"{note}{name} · {about}" + (" · Enter opens it" if opens else "")
             results.append((
                 match_id, one_line(split_cursor(text)[0], 200),
-                abbr.get("icon", "internet-web-browser" if opens else "edit-paste"), category,
+                abbr.get("icon", "internet-web-browser" if opens else "edit-paste"), shown_category,
                 relevance, {"subtext": subtext, "category": group, "actions": buttons},
             ))
         return results
