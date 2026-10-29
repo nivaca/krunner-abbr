@@ -21,7 +21,8 @@ from krunner_abbr_match import (BUILTIN_ID, BUILTINS, CASE_ID, CASE_WORD, CLIP_I
                                 CLIP_WORD, FILTER_ICON, FILTER_ID, HIGH, HIGHEST, LAZY_TIMEOUT, LOW,
                                 apply_case, builtin_matches, case_icon, case_query, case_style,
                                 case_variants, chain_query, complete_chain, find_matches,
-                                open_settings, run_builtin, run_chain, typed_key, word_query)
+                                match_reason, open_settings, run_builtin, run_chain, typed_key,
+                                word_query)
 from krunner_abbr_template import collect_answers, expand, is_lazy, needs_input, split_cursor
 
 SERVICE = "io.github.nivaca.AbbrKRunner"
@@ -107,14 +108,18 @@ class Runner(dbus.service.Object):
             buttons = self.actions("template", "edit") if opens else self.abbr_actions()
             group = abbr.get("group") or "Abbreviations"
             note = "matches the clipboard · " if category == HIGH else ""
+            # the name, and why it matched when the name doesn't show it (alias, typo…)
+            name = " · ".join(filter(None, [abbr["key"], match_reason(self.cfg, abbr, query)]))
             if is_lazy(abbr):  # computed in Run: slow commands, or prompts for input
                 label = abbr.get("description") or one_line(abbr["text"], 200)
                 hint = ("press Enter, then fill in the prompt" if needs_input(abbr["text"])
                         else "press Enter to open" if opens else "press Enter to run and copy")
+                if last := self.usage.last_result(abbr["key"]):
+                    hint = f"last: {one_line(last, 60)} · {hint}"
                 results.append((
                     match_id, f"{label}: {arg}" if arg else label,
                     abbr.get("icon", "system-run"), category, relevance,
-                    {"subtext": f"{note}{abbr['key']} · {hint}", "category": group,
+                    {"subtext": f"{note}{name} · {hint}", "category": group,
                      "actions": buttons},
                 ))
                 continue
@@ -129,7 +134,7 @@ class Runner(dbus.service.Object):
                 continue
             self.shown[match_id] = text
             about = abbr.get("description") or ("open" if opens else "copy to clipboard")
-            subtext = f"{note}{abbr['key']} · {about}" + (" · Enter opens it" if opens else "")
+            subtext = f"{note}{name} · {about}" + (" · Enter opens it" if opens else "")
             results.append((
                 match_id, one_line(split_cursor(text)[0], 200),
                 abbr.get("icon", "internet-web-browser" if opens else "edit-paste"), category,
@@ -292,7 +297,8 @@ class Runner(dbus.service.Object):
         """
         text, back = split_cursor(text)
         if "text" in abbr:  # a configured abbreviation, not a case/filter/history result
-            self.usage.record(abbr["key"])
+            # lazy ones keep their result, to show it in KRunner next time
+            self.usage.record(abbr["key"], text if is_lazy(abbr) else None)
         if abbr.get("action") == "open":
             open_url(text)
             return

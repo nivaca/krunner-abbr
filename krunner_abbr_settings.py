@@ -15,9 +15,10 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections import Counter
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QPalette
+from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
@@ -29,6 +30,29 @@ import krunner_abbr as k
 from krunner_abbr_form import run_form
 
 KEY_RE = re.compile(r"^\S+$")
+# list items: the index in SettingsDialog.entries (None on a group header), and the group
+ENTRY_ROLE = Qt.UserRole + 1
+GROUP_ROLE = Qt.UserRole + 2
+
+
+def entry_problems(e: dict, key_counts: Counter) -> dict[str, str]:
+    """What stops e from being saved, by field (key, text, when); key_counts counts the
+    lowercase names of all abbreviations, to find the ones defined twice."""
+    problems = {}
+    key = e["key"]
+    if not key:
+        problems["key"] = "An abbreviation has no name."
+    elif not KEY_RE.match(key):
+        problems["key"] = f"“{key}” contains spaces; abbreviations must be one word."
+    elif key_counts[key.lower()] > 1:
+        problems["key"] = f"“{key}” is defined twice (names are case-insensitive)."
+    if not e["text"]:
+        problems["text"] = f"“{key}” has an empty expansion."
+    try:
+        re.compile(e.get("when") or "")
+    except re.error as ex:
+        problems["when"] = f"“{key}”: the “Suggest when” pattern is not valid: {ex}"
+    return problems
 
 # (label, text inserted at the cursor)
 PLACEHOLDERS = [
@@ -159,13 +183,24 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
 
 
 class EntryDelegate(QStyledItemDelegate):
-    """List row: the abbreviation, then its description (Qt.UserRole) in muted text."""
+    """List row: the abbreviation, then its description (Qt.UserRole) in muted text; or a
+    group header, in bold muted text."""
 
     GAP = 12
 
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
+        if index.data(ENTRY_ROLE) is None:  # a group header
+            painter.save()
+            font = QFont(opt.font)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(opt.palette.color(QPalette.Active, QPalette.PlaceholderText))
+            painter.drawText(opt.rect.adjusted(4, 0, -4, 0), Qt.AlignBottom | Qt.AlignLeft,
+                             opt.text)
+            painter.restore()
+            return
         key, desc = opt.text, index.data(Qt.UserRole) or ""
         opt.text = ""
         style = opt.widget.style()
@@ -175,8 +210,9 @@ class EntryDelegate(QStyledItemDelegate):
         # align descriptions in a column after the widest key (capped at 45% of the row)
         fm = opt.fontMetrics
         model = index.model()
-        widest = max(fm.horizontalAdvance(model.index(r, 0).data() or "")
-                     for r in range(model.rowCount()))
+        widest = max((fm.horizontalAdvance(model.index(r, 0).data() or "")
+                      for r in range(model.rowCount())
+                      if model.index(r, 0).data(ENTRY_ROLE) is not None), default=0)
         key_width = min(widest, int(rect.width() * 0.45))
 
         selected = bool(opt.state & QStyle.State_Selected)
@@ -204,6 +240,8 @@ class SettingsDialog(QDialog):
         self.resize(940, 600)
         self.path = k.CONFIG_FILE
         self.entries: list[dict] = []
+        self.removed: list[tuple[int, dict]] = []  # (index, entry), for Undo
+        self.warnings: dict[QLineEdit, QAction] = {}  # the warning icon in each field
         self.dirty = False
         self.loading = False
 
@@ -311,13 +349,20 @@ class SettingsDialog(QDialog):
         dup_btn.clicked.connect(self.duplicate_entry)
         self.remove_btn = QPushButton(QIcon.fromTheme("list-remove"), "Remove")
         self.remove_btn.clicked.connect(self.remove_entry)
+        self.undo_btn = QPushButton(QIcon.fromTheme("edit-undo"), "Undo")
+        self.undo_btn.clicked.connect(self.undo_remove)
         del_action = QAction(self.list, shortcut=QKeySequence.Delete,
                              shortcutContext=Qt.WidgetShortcut)
         del_action.triggered.connect(self.remove_entry)
         self.list.addAction(del_action)
+        # only in the list: in the fields, Ctrl+Z undoes typing
+        undo_action = QAction(self.list, shortcut=QKeySequence.Undo,
+                              shortcutContext=Qt.WidgetShortcut)
+        undo_action.triggered.connect(self.undo_remove)
+        self.list.addAction(undo_action)
 
         btns = QHBoxLayout()
-        for b in (add_btn, dup_btn, self.remove_btn):
+        for b in (add_btn, dup_btn, self.remove_btn, self.undo_btn):
             btns.addWidget(b)
         left = QWidget()
         lv = QVBoxLayout(left)
@@ -380,6 +425,10 @@ class SettingsDialog(QDialog):
         self.editor = QGroupBox("Abbreviation")
         form = QFormLayout(self.editor)
         form.addRow("Abbreviation:", self.key_edit)
+        # what would stop saving, shown while editing instead of only on Save
+        self.problem_label = QLabel(wordWrap=True)
+        self.problem_label.setStyleSheet("color: palette(link-visited);")
+        form.addRow("", self.problem_label)
         form.addRow("Description:", self.desc_edit)
         form.addRow("Keywords:", self.keywords_edit)
         form.addRow("Aliases:", self.aliases_edit)
@@ -426,6 +475,7 @@ class SettingsDialog(QDialog):
         self.format_combo.currentIndexChanged.connect(self._entry_changed)
         self.text_edit.textChanged.connect(self._entry_changed)
         self.arg_edit.textChanged.connect(lambda: self.preview_timer.start())
+        self.group_edit.editingFinished.connect(self._group_edited)
 
         splitter = QSplitter()
         splitter.addWidget(left)
@@ -458,47 +508,31 @@ class SettingsDialog(QDialog):
         self.enter_pastes_check.setChecked(bool(settings.get("enter_pastes", False)))
         self.rank_check.setChecked(bool(settings.get("rank_by_use", True)))
         self.disabled_groups_edit.setText(", ".join(k.as_list(settings.get("disabled_groups", []))))
-        self.list.clear()
-        for e in self.entries:
-            self.list.addItem(self._make_item(e))
         self.loading = False
-        self.list.setCurrentRow(0 if self.entries else -1)
-        self.show_entry(self.list.currentRow())
-        self._update_trigger_example()
+        self.removed.clear()
+        self._update_undo()
+        self.rebuild_list(None)  # selects the first abbreviation
+        self._update_general()
         self.set_dirty(src != self.path)  # loaded from the example: not saved yet
 
     def validate(self) -> str | None:
-        seen = {}
-        for row, e in enumerate(self.entries):
-            key = e["key"]
-            if not key:
-                return self._fail(row, "An abbreviation has no name.")
-            if not KEY_RE.match(key):
-                return self._fail(row, f"“{key}” contains spaces; abbreviations must be one word.")
-            if key.lower() in seen:
-                return self._fail(row, f"“{key}” is defined twice (names are case-insensitive).")
-            if not e["text"]:
-                return self._fail(row, f"“{key}” has an empty expansion.")
-            try:
-                re.compile(e.get("when") or "")
-            except re.error as ex:
-                return self._fail(row, f"“{key}”: the “Suggest when” pattern is not valid: {ex}")
-            seen[key.lower()] = row
-        if any(c.isspace() for c in self.prefix_edit.text().strip()):
-            return "The trigger keyword cannot contain spaces."
-        return None
+        counts = self.key_counts()
+        for e in self.entries:
+            if problems := entry_problems(e, counts):
+                return self._fail(e, next(iter(problems.values())))
+        return self.prefix_problem() or None
 
     def select_key(self, key: str) -> None:
         """Show abbreviation key (case-insensitive), if it exists."""
-        for row, e in enumerate(self.entries):
+        for e in self.entries:
             if e["key"].lower() == key.lower():
                 self.filter_edit.clear()
-                self.list.setCurrentRow(row)
+                self.list.setCurrentItem(self.entry_item(e))
                 return
 
-    def _fail(self, row: int, msg: str) -> str:
+    def _fail(self, e: dict, msg: str) -> str:
         self.filter_edit.clear()
-        self.list.setCurrentRow(row)
+        self.list.setCurrentItem(self.entry_item(e))
         return msg
 
     def save(self) -> bool:
@@ -562,7 +596,16 @@ class SettingsDialog(QDialog):
     def _general_changed(self):
         if not self.loading:
             self.set_dirty(True)
+        self._update_general()
+
+    def _update_general(self):
         self._update_trigger_example()
+        self._set_warning(self.prefix_edit, self.prefix_problem())
+
+    def prefix_problem(self) -> str:
+        if any(c.isspace() for c in self.prefix_edit.text().strip()):
+            return "The trigger keyword cannot contain spaces."
+        return ""
 
     def _update_trigger_example(self):
         prefix = self.prefix_edit.text().strip()
@@ -572,23 +615,87 @@ class SettingsDialog(QDialog):
 
     # ---- abbreviation list
 
-    def _make_item(self, e: dict) -> QListWidgetItem:
-        item = QListWidgetItem()
-        self._refresh_item(item, e)
-        return item
+    def rebuild_list(self, select: dict | None):
+        """Fill the list from self.entries and show select (else the first one shown).
 
-    @staticmethod
-    def _refresh_item(item: QListWidgetItem, e: dict):
-        item.setText(e["key"] or "(unnamed)")
-        item.setIcon(QIcon.fromTheme(e["icon"] or "edit-paste"))
-        item.setData(Qt.UserRole, e["description"])
-        item.setToolTip(e["description"] or k.one_line(e["text"], 80))
+        When some abbreviations have a group, they are listed by group under headers,
+        with the ones without a group last; otherwise in the order of the file.
+        """
+        groups = [e.get("group", "").strip() for e in self.entries]
+        order = list(range(len(self.entries)))
+        grouped = any(groups)
+        if grouped:
+            order.sort(key=lambda i: (not groups[i], groups[i].lower()))
+        counts = Counter(groups)
+        self.list.blockSignals(True)
+        self.list.clear()
+        header = None
+        for i in order:
+            if grouped and groups[i] != header:
+                header = groups[i]
+                item = QListWidgetItem(f"{header or 'No group'}  ({counts[header]})")
+                item.setFlags(Qt.NoItemFlags)
+                item.setData(GROUP_ROLE, header)
+                self.list.addItem(item)
+            item = QListWidgetItem()
+            item.setData(ENTRY_ROLE, i)
+            item.setData(GROUP_ROLE, groups[i])
+            self.list.addItem(item)
+        self.refresh_items()
+        self.apply_filter(self.filter_edit.text())
+        target = self.entry_item(select) if select is not None else None
+        if target is None or target.isHidden():
+            target = next((item for item, _ in self.entry_items() if not item.isHidden()), None)
+        self.list.setCurrentItem(target)
+        self.list.blockSignals(False)
+        self.show_entry()
+
+    def entry_items(self):
+        """(item, entry) for each abbreviation in the list, in the order shown."""
+        for row in range(self.list.count()):
+            item = self.list.item(row)
+            if (i := item.data(ENTRY_ROLE)) is not None:
+                yield item, self.entries[i]
+
+    def entry_item(self, e: dict) -> QListWidgetItem | None:
+        return next((item for item, x in self.entry_items() if x is e), None)
+
+    def key_counts(self) -> Counter:
+        return Counter(e["key"].lower() for e in self.entries)
+
+    def refresh_items(self):
+        """Names, icons and descriptions in the list; a warning icon on the ones with problems."""
+        counts = self.key_counts()
+        for item, e in self.entry_items():
+            problems = entry_problems(e, counts)
+            item.setText(e["key"] or "(unnamed)")
+            item.setIcon(QIcon.fromTheme("dialog-warning" if problems else e["icon"] or "edit-paste"))
+            item.setData(Qt.UserRole, e["description"])
+            item.setToolTip("\n".join(problems.values()) or e["description"]
+                            or k.one_line(e["text"], 80))
+
+    def _set_warning(self, edit: QLineEdit, problem: str):
+        """Show a warning icon at the end of edit, with problem as its tooltip ("" hides it)."""
+        if edit not in self.warnings:
+            self.warnings[edit] = edit.addAction(QIcon.fromTheme("dialog-warning"),
+                                                 QLineEdit.TrailingPosition)
+        self.warnings[edit].setVisible(bool(problem))
+        self.warnings[edit].setToolTip(problem)
+
+    def show_problems(self):
+        e = self.current()
+        problems = entry_problems(e, self.key_counts()) if e else {}
+        self._set_warning(self.key_edit, problems.get("key", ""))
+        self._set_warning(self.when_edit, problems.get("when", ""))
+        self.problem_label.setText("\n".join(problems.values()))
+        self.problem_label.setVisible(bool(problems))
 
     def current(self) -> dict | None:
-        row = self.list.currentRow()
-        return self.entries[row] if 0 <= row < len(self.entries) else None
+        item = self.list.currentItem()
+        i = item.data(ENTRY_ROLE) if item is not None else None
+        return self.entries[i] if i is not None else None
 
-    def show_entry(self, row: int):
+    def show_entry(self, *_):
         e = self.current()
         self.editor.setEnabled(e is not None)
         self.remove_btn.setEnabled(e is not None)
@@ -607,6 +714,7 @@ class SettingsDialog(QDialog):
         self.text_edit.setPlainText(e["text"] if e else "")
         self.loading = False
         self._update_icon_preview()
+        self.show_problems()
         self.update_preview()
 
     def _entry_changed(self):
@@ -624,7 +732,8 @@ class SettingsDialog(QDialog):
         e["propagate_case"] = self.case_check.isChecked()
         e["format"] = self.format_combo.currentData()
         e["text"] = self.text_edit.toPlainText()
-        self._refresh_item(self.list.currentItem(), e)
+        self.refresh_items()  # all of them: a changed name can make or end a duplicate
+        self.show_problems()
         self._update_icon_preview()
         self._update_trigger_example()
         self.set_dirty(True)
@@ -635,11 +744,16 @@ class SettingsDialog(QDialog):
             QIcon.fromTheme(self.icon_edit.text().strip() or "edit-paste").pixmap(22, 22)
         )
 
+    def _group_edited(self):
+        """Move the abbreviation under its new group header, once the group is typed."""
+        e, item = self.current(), self.list.currentItem()
+        if e is not None and e.get("group", "") != item.data(GROUP_ROLE):
+            self.rebuild_list(e)
+
     def _insert_row(self, e: dict):
         self.filter_edit.clear()
         self.entries.append(e)
-        self.list.addItem(self._make_item(e))
-        self.list.setCurrentRow(len(self.entries) - 1)
+        self.rebuild_list(e)
         self.set_dirty(True)
         self.key_edit.setFocus()
         self.key_edit.selectAll()
@@ -650,26 +764,57 @@ class SettingsDialog(QDialog):
         while f"new{n}" in existing:
             n += 1
         self._insert_row({"key": f"new{n}", "text": "", "description": "", "icon": "", "lazy": False,
-                          "keywords": "", "format": ""})
+                          "keywords": "", "format": "", "aliases": "", "group": "", "action": "",
+                          "when": "", "propagate_case": False})
 
     def duplicate_entry(self):
         if e := self.current():
             self._insert_row({**e, "key": e["key"] + "2"})
 
     def remove_entry(self):
-        row = self.list.currentRow()
-        if not 0 <= row < len(self.entries):
+        if (e := self.current()) is None:
             return
-        del self.entries[row]
-        self.list.takeItem(row)
+        # then show the next one in the list, or the previous one at the end
+        shown = [x for item, x in self.entry_items() if not item.isHidden()]
+        pos = next(n for n, x in enumerate(shown) if x is e)
+        neighbour = (shown[pos + 1:] or shown[pos - 1:pos] or [None])[0]
+        i = next(n for n, x in enumerate(self.entries) if x is e)
+        self.removed.append((i, e))
+        del self.entries[i]
+        self.rebuild_list(neighbour)
+        self._update_undo()
         self.set_dirty(True)
-        self.show_entry(self.list.currentRow())
+
+    def undo_remove(self):
+        """Put back the abbreviation removed last, where it was."""
+        if not self.removed:
+            return
+        i, e = self.removed.pop()
+        self.entries.insert(min(i, len(self.entries)), e)
+        if self.filter_edit.text():
+            self.filter_edit.clear()  # it might not match the filter
+        self.rebuild_list(e)
+        self._update_undo()
+        self.set_dirty(True)
+        self.list.setFocus()
+
+    def _update_undo(self):
+        self.undo_btn.setEnabled(bool(self.removed))
+        self.undo_btn.setToolTip(f"Bring back “{self.removed[-1][1]['key']}” (Ctrl+Z in the list)"
+                                 if self.removed else "Nothing removed to bring back")
 
     def apply_filter(self, text: str):
         text = text.lower()
-        for row, e in enumerate(self.entries):
-            hit = not text or any(text in e[f].lower() for f in ("key", "description", "keywords", "aliases", "group", "text"))
-            self.list.item(row).setHidden(not hit)
+        shown_groups = set()
+        for item, e in self.entry_items():
+            hit = not text or any(text in e.get(f, "").lower() for f in ("key", "description", "keywords", "aliases", "group", "text"))
+            item.setHidden(not hit)
+            if hit:
+                shown_groups.add(item.data(GROUP_ROLE))
+        for row in range(self.list.count()):  # headers of groups with nothing shown
+            item = self.list.item(row)
+            if item.data(ENTRY_ROLE) is None:
+                item.setHidden(item.data(GROUP_ROLE) not in shown_groups)
 
     # ---- editor helpers
 

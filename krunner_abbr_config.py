@@ -42,6 +42,7 @@ def as_list(value) -> list[str]:
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "krunner-abbr"
 USAGE_FILE = STATE_DIR / "usage.json"
 USAGE_HALF_LIFE = 30  # days for a use to count half as much
+RESULT_MAX = 300  # characters of the last result kept for lazy abbreviations
 
 
 class Usage:
@@ -59,16 +60,22 @@ class Usage:
             pass
         return self.data
 
-    def record(self, key: str) -> None:
+    def record(self, key: str, result: str | None = None) -> None:
+        """Count a use of key; result is kept to show next time (for lazy abbreviations)."""
         entry = self.load().setdefault(key.lower(), {"count": 0, "last": 0})
         entry["count"] += 1
         entry["last"] = time.time()
+        if result is not None:
+            entry["result"] = result[:RESULT_MAX]
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self.data, indent=1))
             self.mtime = self.path.stat().st_mtime
         except OSError as e:
             print(f"cannot save usage: {e}", file=sys.stderr)
+
+    def last_result(self, key: str) -> str:
+        return self.load().get(key.lower(), {}).get("result", "")
 
     def score(self, key: str) -> float:
         entry = self.load().get(key.lower())

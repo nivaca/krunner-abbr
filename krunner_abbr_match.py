@@ -46,6 +46,7 @@ HIGHEST = 100
 LOW = 30
 HIGH = 70  # the keyword alone: abbreviations whose `when` matches the clipboard
 LOWEST = 0  # matched by description or keywords
+TYPO_MIN_CHARS = 4  # typed names this long also find names one typo away
 LAZY_TIMEOUT = 20.0  # seconds for abbreviations computed only when Enter is pressed
 
 
@@ -181,6 +182,24 @@ def clipboard_matches(abbr: dict, clipboard: str) -> bool:
         return False
 
 
+def names_of(abbr: dict) -> list[str]:
+    """The lowercase name of abbr and its aliases."""
+    return [abbr["key"].lower()] + [a.lower() for a in as_list(abbr.get("aliases"))]
+
+
+def one_edit_apart(a: str, b: str) -> bool:
+    """Whether b is a with one letter changed, added or removed, or two neighbours swapped."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(diff) == 1 or (len(diff) == 2 and diff[1] == diff[0] + 1
+                                  and a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]])
+    short, long = sorted((a, b), key=len)
+    i = next((i for i, (x, y) in enumerate(zip(short, long)) if x != y), len(short))
+    return short[i:] == long[i + 1:]
+
+
 def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
     """Return (abbr, arg, category) for every abbreviation matching query."""
     query = query.strip()
@@ -203,9 +222,14 @@ def find_matches(cfg: Config, query: str) -> list[tuple[dict, str, int]]:
         matches.append((exact, arg, HIGHEST))
     if not arg and cfg.min_prefix_chars and len(key) >= cfg.min_prefix_chars:
         for k, abbr in sorted(cfg.abbrs.items()):
-            names = [k] + [a.lower() for a in as_list(abbr.get("aliases"))]
-            if abbr is not exact and any(n.startswith(key) for n in names):
+            if abbr is not exact and any(n.startswith(key) for n in names_of(abbr)):
                 matches.append((abbr, "", LOW))
+        # then names one typo away: "ex sgi" finds sig; 4+ letters
+        if len(key) >= TYPO_MIN_CHARS:
+            for k, abbr in sorted(cfg.abbrs.items()):
+                listed = any(a is abbr for a, _, _ in matches)
+                if not listed and any(one_edit_apart(key, n) for n in names_of(abbr)):
+                    matches.append((abbr, "", LOWEST))
         # then words in descriptions and keywords: "ex fecha" finds isod; 3+ letters
         want = deaccent(key)
         if len(want) >= max(3, cfg.min_prefix_chars):
@@ -222,6 +246,24 @@ def typed_key(cfg: Config, query: str) -> str:
     """The abbreviation as typed (with its case), without the keyword."""
     rest = strip_trigger(query.strip(), cfg.prefix) if cfg.prefix else query.strip()
     return (rest or "").split(" ", 1)[0]
+
+
+def match_reason(cfg: Config, abbr: dict, query: str) -> str:
+    """Why abbr matches query when its own name doesn't explain it: an alias, a typo,
+    a keyword or the description. "" otherwise."""
+    key = typed_key(cfg, query).lower()
+    if not key or abbr["key"].lower().startswith(key):
+        return ""
+    for alias in as_list(abbr.get("aliases")):
+        if alias.lower().startswith(key):
+            return f"via alias {alias}"
+    if any(one_edit_apart(key, n) for n in names_of(abbr)):
+        return f"similar to “{key}”"
+    word = re.compile(rf"\b{re.escape(deaccent(key))}", re.I)
+    for keyword in as_list(abbr.get("keywords")):
+        if word.search(deaccent(keyword)):
+            return f"keyword “{keyword}”"
+    return "found in the description"
 
 
 def case_style(typed: str) -> str:
