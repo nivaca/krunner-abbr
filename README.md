@@ -84,6 +84,14 @@ To update, get the new code and run `./install.sh` again. Your configuration sta
 is. New example abbreviations are not added to it automatically: look in the
 `abbreviations.toml` of the project and copy the ones you want.
 
+To start again with the example configuration:
+
+    ./install.sh --clean
+
+This replaces `~/.config/krunner-abbr/abbreviations.toml` with the example. Before, it
+saves your old file next to it, as `abbreviations.toml.bak-` plus the date and time. If the
+file is a symbolic link, the file where it points is the one replaced.
+
 To remove it:
 
     ./uninstall.sh            # removes the plugin, keeps your abbreviations

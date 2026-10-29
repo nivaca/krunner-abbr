@@ -2,7 +2,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Nicolas Vaughan
 # Install krunner-abbr as a D-Bus-activated KRunner plugin for the current user.
+# With --clean, replace your configuration with the example (a backup is kept).
 set -euo pipefail
+
+CLEAN=false
+case "${1:-}" in
+    "") ;;
+    --clean) CLEAN=true ;;
+    *) echo "usage: $0 [--clean]" >&2; exit 2 ;;
+esac
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SERVICE=io.github.nivaca.AbbrKRunner
@@ -39,7 +47,15 @@ EOF
 # at that path (-L also catches a dangling symlink, e.g. into a not-yet-synced folder);
 # cp -n is a second guard against overwriting
 CONFIG="$CONF/abbreviations.toml"
-if [[ -e "$CONFIG" || -L "$CONFIG" ]]; then
+if $CLEAN && [[ -e "$CONFIG" ]]; then
+    # back up first; through a symlink (e.g. into Dropbox) the file it points to is replaced
+    BACKUP="$CONFIG.bak-$(date +%Y%m%d-%H%M%S)"
+    cp -L "$CONFIG" "$BACKUP"
+    cat "$HERE/abbreviations.toml" > "$CONFIG"
+    echo "Replaced $CONFIG with the example (your old one is in $BACKUP)"
+elif $CLEAN && [[ -L "$CONFIG" ]]; then
+    echo "Kept $CONFIG: it is a symlink to a file that is not there (not synced yet?)" >&2
+elif [[ -e "$CONFIG" || -L "$CONFIG" ]]; then
     echo "Kept your existing $CONFIG"
 else
     cp -n "$HERE/abbreviations.toml" "$CONFIG"
