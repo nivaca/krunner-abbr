@@ -356,7 +356,7 @@ class Runner(dbus.service.Object):
             scripting = dbus.Interface(dbus.SessionBus().get_object("org.kde.KWin", "/Scripting"),
                                        "org.kde.kwin.Scripting")
             scripting.unloadScript(WINDOW_SCRIPT_NAME)
-            script_id = scripting.loadScript(str(WINDOW_SCRIPT), WINDOW_SCRIPT_NAME)
+            script_id = scripting.loadScript(str(WINDOW_SCRIPT), WINDOW_SCRIPT_NAME, signature="ss")
             dbus.Interface(dbus.SessionBus().get_object("org.kde.KWin", f"/Scripting/Script{script_id}"),
                            "org.kde.kwin.Script").run()
             GLib.timeout_add(500, finish, [])  # no answer: paste with Ctrl+V
