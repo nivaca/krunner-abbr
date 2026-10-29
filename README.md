@@ -101,7 +101,7 @@ It is possible to make an RPM, for installing it like any other program:
 
     sudo dnf install rpm-build
     ./build_rpm.py
-    sudo dnf install build/rpm/krunner-abbr-0.1-1.fc44.noarch.rpm
+    sudo dnf install build/rpm/krunner-abbr-1.1-1.fc44.noarch.rpm
 
 The script takes the version from `__version__` in `krunner_abbr.py` and the files of the
 git folder (also the ones not committed yet), and leaves the packages in `build/rpm/`.
