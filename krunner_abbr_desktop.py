@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 
 # ---------------------------------------------------------------- clipboard
@@ -136,22 +137,41 @@ def paste_clipboard(combo: str = "ctrl+v", back: int = 0) -> None:
 # ---------------------------------------------------------------- notifications
 
 
+NOTIFY_TIMEOUT = 5000  # ms
 _last_notification = 0  # replaced by the next notification instead of stacking up
+_last_notified = 0.0
+_watching = False
+
+
+def _closed(notification_id, reason) -> None:
+    global _last_notification
+    if int(notification_id) == _last_notification:
+        _last_notification = 0
 
 
 def notify(summary: str, body: str = "", icon: str = "edit-paste") -> None:
-    global _last_notification
+    """Show a notification, replacing the previous one only while it is still on screen.
+
+    Plasma keeps the "expired"/"dismissed" state of a notification when it is replaced,
+    so replacing one that was already closed shows nothing at all.
+    """
+    global _last_notification, _last_notified, _watching
     try:
         import dbus
 
+        bus = dbus.SessionBus()
+        if not _watching:  # needs the GLib main loop of the runner; outside it, the timer is enough
+            bus.add_signal_receiver(_closed, "NotificationClosed", "org.freedesktop.Notifications",
+                                    path="/org/freedesktop/Notifications")
+            _watching = True
+        still_open = time.monotonic() - _last_notified < NOTIFY_TIMEOUT / 1000 - 1
         _last_notification = int(dbus.Interface(
-            dbus.SessionBus().get_object(
-                "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
-            ),
+            bus.get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications"),
             "org.freedesktop.Notifications",
-        ).Notify("Abbreviations", dbus.UInt32(_last_notification), icon, summary, body,
-                 dbus.Array([], "s"), dbus.Dictionary({"transient": dbus.Boolean(True)}, "sv"),
-                 5000))
+        ).Notify("Abbreviations", dbus.UInt32(_last_notification if still_open else 0), icon,
+                 summary, body, dbus.Array([], "s"),
+                 dbus.Dictionary({"transient": dbus.Boolean(True)}, "sv"), NOTIFY_TIMEOUT))
+        _last_notified = time.monotonic()
     except Exception as e:
         print(f"notification failed: {e}", file=sys.stderr)
 
