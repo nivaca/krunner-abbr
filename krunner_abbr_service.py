@@ -19,10 +19,11 @@ from krunner_abbr_filters import (FILTERS, deaccent, markdown_to_html, one_line,
                                   parse_filter_chain)
 from krunner_abbr_match import (BUILTIN_ID, BUILTINS, CASE_ID, CASE_WORD, CLIP_ID, CLIP_MAX,
                                 CLIP_WORD, FILTER_ICON, FILTER_ID, HIGH, HIGHEST, LAZY_TIMEOUT, LOW,
+                                PASTE_ID, PASTE_WORD,
                                 apply_case, builtin_matches, case_icon, case_query, case_style,
-                                case_variants, chain_query, complete_chain, find_matches,
-                                keyword_alone, match_reason, open_settings, run_builtin, run_chain,
-                                typed_key, word_query)
+                                case_variants, chain_pastes, chain_query, complete_chain,
+                                find_matches, keyword_alone, match_reason, open_settings,
+                                run_builtin, run_chain, split_paste, typed_key, word_query)
 from krunner_abbr_template import collect_answers, expand, is_lazy, needs_input, split_cursor
 
 SERVICE = "io.github.nivaca.AbbrKRunner"
@@ -31,8 +32,6 @@ IFACE = "org.kde.krunner1"
 
 # buttons on each match: id -> (text, icon)
 ACTIONS = {
-    "paste": ("Copy and paste into the previous window", "edit-paste"),
-    "copy": ("Copy without pasting", "edit-copy"),  # replaces "paste" when Enter pastes
     "template": ("Copy the template instead of the expansion", "text-x-generic"),
     "edit": ("Edit this abbreviation", "document-edit"),
 }
@@ -63,20 +62,27 @@ class Runner(dbus.service.Object):
         self.window_callback = None  # waiting for ReportWindow
 
     def actions(self, *ids: str):
-        """Match property listing which ACTIONS buttons a match shows (none if empty).
-
-        "paste" stands for whichever of paste / copy Enter doesn't already do.
-        """
-        alt = "copy" if self.cfg.enter_pastes else "paste"
-        return dbus.Array([alt if i == "paste" else i for i in ids], signature="s")
+        """Match property listing which ACTIONS buttons a match shows (none if empty)."""
+        return dbus.Array(ids, signature="s")
 
     def abbr_actions(self):
-        return self.actions("paste", "template", "edit")
+        return self.actions("template", "edit")
+
+    @staticmethod
+    def pasting(result: tuple) -> tuple:
+        """result, made to paste on Enter (its id gets PASTE_ID; Run takes it off)."""
+        match_id, title, icon, category, relevance, props = result
+        if match_id.startswith(PASTE_ID):
+            return result
+        props = {**props, "subtext": " · ".join(filter(None, [props.get("subtext"),
+                                                              "Enter pastes"]))}
+        return PASTE_ID + match_id, title, icon, category, relevance, props
 
     @dbus.service.method(IFACE, in_signature="s", out_signature="a(sssida{sv})")
     def Match(self, query: str):
         self.cfg.reload_if_changed()
         self.shown = {}
+        query, paste = split_paste(self.cfg, query)
         results = []
         for word, category in builtin_matches(self.cfg, query):
             title, subtext, icon = BUILTINS[word]
@@ -144,7 +150,7 @@ class Runner(dbus.service.Object):
                 abbr.get("icon", "internet-web-browser" if opens else "edit-paste"), shown_category,
                 relevance, {"subtext": subtext, "category": group, "actions": buttons},
             ))
-        return results
+        return [self.pasting(r) for r in results] if paste else results
 
     def case_results(self, text: str) -> list:
         """One match per case style of text, or of the clipboard if text is empty."""
@@ -162,7 +168,7 @@ class Runner(dbus.service.Object):
             results.append((
                 match_id, one_line(result, 200), case_icon(name), HIGHEST,
                 1.0 - i * 0.01,  # keep CASE_FILTERS order
-                {"subtext": subtext, "category": "Change case", "actions": self.actions("paste")},
+                {"subtext": subtext, "category": "Change case", "actions": self.actions()},
             ))
         return results
 
@@ -183,7 +189,9 @@ class Runner(dbus.service.Object):
         results = []
         for i, full in enumerate(chains):
             match_id = f"{FILTER_ID}{full}\x1f{text}"
-            last = FILTERS[parse_filter_chain(full)[-1][0]][3]
+            # what the chain does: its last filter, not counting |paste
+            names = [n for n, _ in parse_filter_chain(full) if n != PASTE_WORD] or [PASTE_WORD]
+            last = FILTERS[names[-1]][3]
             subtext = f"{full} · {last}" + ("" if text else " · from clipboard")
             if "|sh" in full:  # never run shell commands while typing
                 title, icon = "Press Enter to run the shell command", "system-run"
@@ -198,10 +206,11 @@ class Runner(dbus.service.Object):
                     continue
                 self.shown[match_id] = result
                 title, icon = one_line(result, 200) or "(empty)", FILTER_ICON
-            results.append((
+            result = (
                 match_id, title, icon, HIGHEST, 1.0 - i * 0.001,  # keep FILTERS order
-                {"subtext": subtext, "category": "Filters", "actions": self.actions("paste")},
-            ))
+                {"subtext": subtext, "category": "Filters", "actions": self.actions()},
+            )
+            results.append(self.pasting(result) if chain_pastes(full) else result)
         return results
 
     def clip_results(self, search: str) -> list:
@@ -220,7 +229,7 @@ class Runner(dbus.service.Object):
             results.append((
                 match_id, one_line(text, 200), "klipper", HIGHEST, 1.0 - pos * 0.001,
                 {"subtext": subtext, "category": "Clipboard history",
-                 "actions": self.actions("paste")},
+                 "actions": self.actions()},
             ))
             if len(results) == CLIP_MAX:
                 break
@@ -237,11 +246,12 @@ class Runner(dbus.service.Object):
 
     @dbus.service.method(IFACE, in_signature="ss")
     def Run(self, match_id: str, action_id: str):
+        # Enter copies; it also pastes when the query had |paste
+        paste = match_id.startswith(PASTE_ID)
+        match_id = match_id.removeprefix(PASTE_ID)
         if match_id.startswith(BUILTIN_ID):
             run_builtin(self.cfg, match_id[len(BUILTIN_ID):])
             return
-        # Enter (no action) pastes or copies per the setting; the buttons do the other
-        paste = action_id == "paste" or (not action_id and self.cfg.enter_pastes)
         if match_id.startswith(CASE_ID):
             name, sep, typed = match_id[len(CASE_ID):].partition("\x1f")
             if not sep or name not in FILTERS:

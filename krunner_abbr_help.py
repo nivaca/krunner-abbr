@@ -177,7 +177,7 @@ RECIPES = [
      "RAE (https://dle.rae.es/…), Perseus, a library catalogue…"),
     ("LaTeX command with the cursor inside",
      "When the abbreviation is pasted, the cursor goes back to {cursor}, here shown as ▮. "
-     "This needs pasting (the button, or enter_pastes = true).",
+     "This needs pasting: write |paste at the end, ex emc|paste.",
      'emc = "\\\\emph{{{cursor}}}"', "", "", None, {}, None),
     ("A letter that asks for the details",
      "All the questions come in one window when you press Enter. The checkbox decides if the "
@@ -465,8 +465,9 @@ clipboard. {keyword} The names are not case-sensitive.</p>
       From 3 letters, the words of the descriptions and the keywords are searched too, a bit lower.</li>
   <li>The text after the abbreviation is its argument: {t("upper hello")} gives
       <code>HELLO</code>. When you don't write anything, most of them take the clipboard.</li>
+  <li>Enter copies the result. With {c("|paste")} at the end, {t("isod|paste")}, it also
+      pastes it in the window where you were (see <a href="#pasting">pasting</a>).</li>
   <li>Every result has buttons (with the mouse, or Tab and the arrow keys):
-      <b>{"copy without pasting" if cfg.enter_pastes else "copy and paste"}</b>,
       <b>copy the template</b> (without expanding it) and <b>edit this abbreviation</b>.</li>
   <li>The abbreviations marked <span class="badge">on Enter</span> are computed only when you
       press Enter: slow commands, or the ones that ask you something. A notification shows
@@ -521,8 +522,10 @@ answers to the questions are invented). Most of them are in the example file too
 </table></div>
 
 <h2 id="pasting">Copying and pasting</h2>
-<p>Now, Enter <b>{"copies and pastes" if cfg.enter_pastes else "copies"}</b> the result
-({c("enter_pastes = " + ("true" if cfg.enter_pastes else "false"))}). For pasting, the
+<p>Enter <b>copies</b> the result. To paste it too, write {c("|paste")} at the end of
+what you write: {t("isod|paste")}, {t("sig Ana|paste")}, {t("|upper|paste")} (the clipboard
+in capitals) or only {t("|paste")} (the clipboard as it is). The result says
+<i>Enter pastes</i>, so you see it before. For pasting, the
 runner presses Ctrl+V for you in the window where you were before KRunner. It uses the
 remote control portal of Plasma: the first time, Plasma asks for permission (say yes, and
 remember it). If the portal does not work, it tries {c("ydotool")} with its service running
@@ -631,7 +634,6 @@ converting the new double quotes again.</p>
         ("cmd_timeout", c(str(cfg.cmd_timeout)), "Seconds that a command can take while you "
          f"write (they run on each key). On Enter they can take up to {k.LAZY_TIMEOUT:.0f}."),
         ("notify", c(yes(cfg.notify)), "A notification after every copy."),
-        ("enter_pastes", c(yes(cfg.enter_pastes)), "Enter copies and also pastes."),
         ("rank_by_use", c(yes(cfg.rank_by_use)), "The abbreviations you use more, and more "
          "recently, come first. A use of a month ago counts half."),
         ("disabled_groups", c(str(cfg.disabled_groups).replace("'", '"')), "Groups that are not "

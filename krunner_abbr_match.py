@@ -38,6 +38,8 @@ CASE_FILTERS = [
 CLIP_WORD = "clip"  # "<keyword> clip [search]" lists Klipper's history
 CLIP_ID = "\x1b"  # clipboard-history match ids are "\x1b" + position
 CLIP_MAX = 30  # history entries listed
+PASTE_ID = "\x1a"  # prefix of the match ids whose result Enter pastes
+PASTE_WORD = "paste"  # "|paste" at the end of a query, or in a filter chain
 FILTER_ID = "\x1c"  # filter-chain match ids are "\x1c" + chain + "\x1f" + typed text
 FILTER_ICON = "view-filter"
 
@@ -82,6 +84,27 @@ def builtin_matches(cfg: Config, query: str) -> list[tuple[str, int]]:
         elif cfg.min_prefix_chars and len(rest) >= cfg.min_prefix_chars and word.startswith(rest):
             matches.append((word, LOW))
     return matches
+
+
+def split_paste(cfg: Config, query: str) -> tuple[str, bool]:
+    """(query without a final "|paste", whether it had one).
+
+    "<keyword> |paste" alone stays as it is: it is the filter chain that pastes the clipboard.
+    """
+    stripped = query.rstrip()
+    if not stripped.lower().endswith("|" + PASTE_WORD):
+        return query, False
+    rest = stripped[:-len(PASTE_WORD) - 1]
+    if strip_trigger(rest.strip(), cfg.prefix or DEFAULT_PREFIX) == "":
+        return query, False
+    return rest, True
+
+
+def chain_pastes(chain: str) -> bool:
+    try:
+        return any(name == PASTE_WORD for name, _ in parse_filter_chain(chain))
+    except ValueError:
+        return False
 
 
 def word_query(cfg: Config, query: str, word: str) -> str | None:

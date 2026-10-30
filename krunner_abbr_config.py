@@ -106,7 +106,6 @@ class Config:
         self.min_prefix_chars = 2
         self.cmd_timeout = CMD_TIMEOUT
         self.notify = True
-        self.enter_pastes = False
         self.paste_keys: dict[str, str] = dict(TERMINAL_PASTE_KEYS)
         self.rank_by_use = True
         self.disabled_groups: list[str] = []
@@ -135,7 +134,6 @@ class Config:
         self.min_prefix_chars = int(settings.get("min_prefix_chars", 2))
         self.cmd_timeout = float(settings.get("cmd_timeout", CMD_TIMEOUT))
         self.notify = bool(settings.get("notify", True))
-        self.enter_pastes = bool(settings.get("enter_pastes", False))
         self.paste_keys = dict(TERMINAL_PASTE_KEYS)
         self.paste_keys.update({app.lower(): str(keys).lower()
                                 for app, keys in data.get("paste_keys", {}).items()})

@@ -486,6 +486,8 @@ FILTERS = {
     "words": (lambda s: str(len(s.split())), 0, 0, "word count"),
     "silent": (lambda s: "", 0, 0, "discard the value, e.g. an {ask} used only by a later {cmd}"),
     "chars": (lambda s: str(len(s)), 0, 0, "character count"),
+    # changes nothing: in KRunner, it makes Enter paste the result (see split_paste)
+    "paste": (lambda s: s, 0, 0, "paste the result into the previous window (KRunner only)"),
     "sh": (shell_filter, 1, 1, "pipe through a shell command: sh(sort -u)"),
 }
 

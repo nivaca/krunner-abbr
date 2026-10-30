@@ -7,8 +7,9 @@
 # abbreviations; "ex settings" opens the settings dialog and "ex help" (or "ex ?")
 # the reference. "ex case Some Text" lists the text (or the clipboard) in every case
 # style; "ex |unhyphen|join" applies filters (below) to typed text or the clipboard
-# without defining an abbreviation. Each match also has buttons to paste into the
-# previous window, copy the template, or edit the abbreviation. "ex clip" lists the
+# without defining an abbreviation. Write "|paste" at the end ("ex isod|paste") to
+# paste the result into the previous window, not only copy it. Each match also has
+# buttons to copy the template or edit the abbreviation. "ex clip" lists the
 # clipboard history (add text to search it). Keys are case-insensitive.
 #
 # Placeholders
@@ -102,7 +103,6 @@ prefix = "ex"          # trigger keyword: type "ex isod"; "" = match abbreviatio
 min_prefix_chars = 2   # also suggest abbreviations starting with what you typed; 0 = exact only
 cmd_timeout = 2.0      # seconds allowed for {cmd:...} placeholders
 notify = true          # notification after every copy (run-on-Enter results and errors always notify)
-enter_pastes = false   # true: Enter also pastes into the previous window (needs ydotool or wtype)
 rank_by_use = true     # frequent and recent abbreviations first (counts in ~/.local/state/krunner-abbr)
 disabled_groups = []   # groups not offered in KRunner, e.g. ["LaTeX"]
 

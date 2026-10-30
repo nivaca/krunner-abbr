@@ -143,7 +143,6 @@ def dump_config(settings: dict, entries: list[dict]) -> str:
         f"min_prefix_chars = {settings['min_prefix_chars']}",
         f"cmd_timeout = {settings['cmd_timeout']}",
         f"notify = {'true' if settings['notify'] else 'false'}",
-        f"enter_pastes = {'true' if settings['enter_pastes'] else 'false'}",
         f"rank_by_use = {'true' if settings.get('rank_by_use', True) else 'false'}",
         "disabled_groups = [" + ", ".join(toml_str(g) for g in settings.get("disabled_groups", [])) + "]",
     ]
@@ -324,15 +323,6 @@ class SettingsDialog(QDialog):
         form.addRow("", self._hint(
             "Abbreviations computed on Enter, and errors, always notify, since their "
             "result isn't shown in KRunner."
-        ))
-
-        self.enter_pastes_check = QCheckBox("Paste into the previous window")
-        self.enter_pastes_check.toggled.connect(self._general_changed)
-        form.addRow("Enter:", self.enter_pastes_check)
-        form.addRow("", self._hint(
-            "Enter copies the expansion and presses Ctrl+V in the window you came from; "
-            "a button on each match copies without pasting. The first time, Plasma asks "
-            "permission to control the keyboard; if it can't, <code>ydotool</code> is used."
         ))
 
         self.rank_check = QCheckBox("Rank abbreviations you use often and recently higher")
@@ -517,7 +507,6 @@ class SettingsDialog(QDialog):
         self.min_prefix_spin.setValue(int(settings.get("min_prefix_chars", 2)))
         self.timeout_spin.setValue(float(settings.get("cmd_timeout", k.CMD_TIMEOUT)))
         self.notify_check.setChecked(bool(settings.get("notify", True)))
-        self.enter_pastes_check.setChecked(bool(settings.get("enter_pastes", False)))
         self.rank_check.setChecked(bool(settings.get("rank_by_use", True)))
         self.disabled_groups_edit.setText(", ".join(k.as_list(settings.get("disabled_groups", []))))
         self.loading = False
@@ -557,7 +546,6 @@ class SettingsDialog(QDialog):
             "min_prefix_chars": self.min_prefix_spin.value(),
             "cmd_timeout": round(self.timeout_spin.value(), 1),
             "notify": self.notify_check.isChecked(),
-            "enter_pastes": self.enter_pastes_check.isChecked(),
             "rank_by_use": self.rank_check.isChecked(),
             "disabled_groups": [g.strip() for g in self.disabled_groups_edit.text().split(",")
                                 if g.strip()],

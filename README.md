@@ -150,10 +150,11 @@ not (`;isod`). With an empty keyword, the abbreviations match directly, without
 anything before them. The names are not case-sensitive: `ex ISOD` is the same as
 `ex isod`.
 
+Enter copies the result. To paste it also, write `|paste` at the end: `ex isod|paste`
+(see [Copying and pasting](#copying-and-pasting)).
+
 Every result has some buttons (with the mouse, or with Tab and the arrow keys):
 
-- **Copy and paste**: copies, and pastes in the window where you were (see
-  [Copying and pasting](#copying-and-pasting)).
 - **Copy the template**: copies the abbreviation without expanding it, for example
   `{date}`. Useful when you want to reuse it somewhere.
 - **Edit this abbreviation**: opens the settings dialog with this abbreviation selected.
@@ -187,8 +188,18 @@ If you don't use any keyword (empty `prefix`), these commands still work with `e
 
 ## Copying and pasting
 
-By default, Enter **copies** the result. To **paste** it too, the runner must press
-Ctrl+V for you in the window that you were using before KRunner. For this it uses the
+Enter **copies** the result. To **paste** it too, write `|paste` at the end of the query:
+
+    ex isod|paste           the abbreviation
+    ex sig Ana|paste        also with an argument
+    ex |upper|paste         a filter chain on the clipboard
+    ex |upper|paste text    ... or on some text
+    ex |paste               the clipboard as it is
+
+The result says "Enter pastes", so you know before pressing Enter. Without `|paste`
+nothing is pasted, only copied.
+
+For pasting, the runner must press Ctrl+V for you in the window that you were using before KRunner. For this it uses the
 "remote control" portal of Plasma, so nothing extra is needed. The first time you paste,
 Plasma asks if Abbreviations can control the keyboard: say yes and choose to remember it.
 The permission is saved in `~/.local/state/krunner-abbr/portal-token`; delete this file
@@ -202,13 +213,6 @@ If the portal does not work (or you said no), the runner tries `ydotool`:
 `wtype` works in some compositors, but in KWin it normally does not. On X11, also `xdotool` is used. If
 none of them works, the text stays on the clipboard and a notification explains why it
 was not pasted.
-
-There are two ways to paste:
-
-- The button **Copy and paste** on each result.
-- `enter_pastes = true` in the settings (or "Enter: Paste into the previous window" in
-  the dialog). Then Enter pastes always, and the button changes to **Copy without
-  pasting**.
 
 **Terminals.** Most terminals paste with Ctrl+Shift+V, not Ctrl+V. Before pasting, the
 runner asks KWin which window has the focus, and for these programs it uses
@@ -250,7 +254,6 @@ prefix = "ex"
 min_prefix_chars = 2
 cmd_timeout = 2.0
 notify = true
-enter_pastes = false
 rank_by_use = true
 disabled_groups = []
 ```
@@ -261,7 +264,6 @@ disabled_groups = []
 | `min_prefix_chars` | `2` | After how many letters the abbreviations that *start* with what you wrote are suggested. `0` means only exact names. Search in descriptions and keywords starts at 3 letters (or this number, if it is bigger). |
 | `cmd_timeout` | `2.0` | Seconds that a `{cmd:…}` or `sh(…)` can take while you write. Commands run on every key you press, so they must be fast. On Enter (for `lazy` abbreviations and prompts) they can take up to 20 seconds. |
 | `notify` | `true` | A notification after every copy. |
-| `enter_pastes` | `false` | Enter copies and pastes. |
 | `rank_by_use` | `true` | The abbreviations that you use more, and more recently, come first. |
 | `disabled_groups` | `[]` | Groups that are not offered in KRunner, for example `["LaTeX"]`. |
 
@@ -565,7 +567,7 @@ are also a good documentation of the syntax. Some of them:
 
 `ex settings`, or `./krunner_abbr_settings.py` (needs PySide6).
 
-- **General:** keyword, suggestions, command timeout, notifications, Enter pastes,
+- **General:** keyword, suggestions, command timeout, notifications,
   ranking by use, disabled groups.
 - **Abbreviations:** the list on the left (with a filter), and on the right all the
   fields of the selected one, a menu "Insert Placeholder" with all the placeholders and
