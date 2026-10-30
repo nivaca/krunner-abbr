@@ -463,6 +463,7 @@ The same filters work in KRunner without an abbreviation: `ex |upper|join some t
 |---|---|
 | `urlencode`, `urldecode` | Percent encoding for URLs. |
 | `base64`, `unbase64` | Base64. |
+| `utf16` | Turns UTF-16 code units into normal (UTF-8) text: `\uD83D\uDE00` inside a text, or only the units, like `D83D DE00` or `U+00E9`, become 😀 and é. Surrogate pairs are joined; a unit left alone becomes �. |
 | `latex` | Escapes the special characters of LaTeX: `& % $ # _ { } ~ ^ \`. |
 | `roman`, `unroman` | 2026 ↔ MMXXVI. |
 | `calc` | Calculates: `+ - * / // % **`, parentheses, `round(x, n)` and `abs(x)`. A comma is read as decimal point when there is no point (`1,5*2` → `3`). Only arithmetic is accepted, nothing else. |

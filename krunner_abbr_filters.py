@@ -415,6 +415,22 @@ def sort_items(text: str, sep: str = ", ", *options: str) -> str:
     return sep.join(_sorted(items, options))
 
 
+UTF16_UNIT_RE = r"(?:\\u|[Uu]\+|0[xX])?([0-9A-Fa-f]{4})"
+
+
+def _utf16_units(units: list[str]) -> str:
+    """Decode UTF-16 code units given as hex; surrogate pairs combine, lone ones become �."""
+    return b"".join(bytes.fromhex(u) for u in units).decode("utf-16-be", errors="replace")
+
+
+def from_utf16(text: str) -> str:
+    """UTF-16 code units → text: D83D DE00, U+00E9 or \\uD83D\\uDE00 inside text."""
+    if re.fullmatch(rf"[\s,;]*(?:{UTF16_UNIT_RE}[\s,;]*)+", text):
+        return _utf16_units(re.findall(UTF16_UNIT_RE, text))
+    return re.sub(r"(?:\\u[0-9A-Fa-f]{4})+",
+                  lambda m: _utf16_units(re.findall(r"\\u([0-9A-Fa-f]{4})", m[0])), text)
+
+
 def shell_filter(text: str, command: str, *, timeout: float) -> str:
     res = subprocess.run(command, shell=True, input=text, capture_output=True, text=True,
                          timeout=timeout)
@@ -468,6 +484,7 @@ FILTERS = {
     "urldecode": (urllib.parse.unquote, 0, 0, "percent-decode"),
     "base64": (lambda s: base64.b64encode(s.encode()).decode(), 0, 0, "base64-encode"),
     "unbase64": (lambda s: base64.b64decode(s).decode(errors="replace"), 0, 0, "base64-decode"),
+    "utf16": (from_utf16, 0, 0, "UTF-16 code units → text: \\uD83D\\uDE00 or D83D DE00 → 😀"),
     "roman": (to_roman, 0, 0, "number → Roman numeral: 2026 → MMXXVI"),
     "unroman": (from_roman, 0, 0, "Roman numeral → number: xiv → 14"),
     "nomacrons": (no_macrons, 0, 0, "remove macrons and breves: ā ă → a"),

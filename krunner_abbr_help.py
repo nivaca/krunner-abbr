@@ -48,6 +48,7 @@ FILTER_EXAMPLES = {
     "urldecode": ("a%20b%26c", "|urldecode"),
     "base64": ("hello", "|base64"),
     "unbase64": ("aGVsbG8=", "|unbase64"),
+    "utf16": (r"caf\u00e9 \uD83D\uDE00", "|utf16"),
     "roman": ("2026", "|roman"),
     "unroman": ("MMXXVI", "|unroman"),
     "nomacrons": ("āmīcus", "|nomacrons"),
@@ -251,7 +252,8 @@ FILTER_GROUPS = {
                               "space start",
     "Cleaning text": "join unhyphen squeeze strip replace sub deaccent slug",
     "Lines and lists": "sort sortitems uniq reverse shuffle number",
-    "Encodings and numbers": "urlencode urldecode base64 unbase64 latex roman unroman calc datefmt",
+    "Encodings and numbers": "urlencode urldecode base64 unbase64 utf16 latex roman unroman "
+                             "calc datefmt",
     "Latin": "nomacrons noligatures latinize vtou jtoi",
     "Quotes": "quotes smartquotes straightquotes",
 }
