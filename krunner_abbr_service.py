@@ -2,6 +2,8 @@
 # Copyright (C) 2026 Nicolas Vaughan
 """The KRunner D-Bus service (org.kde.krunner1)."""
 
+import os
+import re
 import sys
 import threading
 import time
@@ -16,7 +18,7 @@ from krunner_abbr_config import CONFIG_FILE, Config, Usage, ensure_config
 from krunner_abbr_desktop import (get_clipboard, get_clipboard_history, notify, open_url,
                                   paste_clipboard, set_clipboard)
 from krunner_abbr_filters import (FILTERS, deaccent, markdown_to_html, one_line,
-                                  parse_filter_chain)
+                                  parse_filter_chain, preview)
 from krunner_abbr_match import (BUILTIN_ID, BUILTINS, CASE_ID, CASE_WORD, CLIP_ID, CLIP_MAX,
                                 CLIP_WORD, FILTER_ICON, FILTER_ID, HIGH, HIGHEST, LAZY_TIMEOUT, LOW,
                                 PASTE_ID, PASTE_WORD,
@@ -67,6 +69,15 @@ class Runner(dbus.service.Object):
 
     def abbr_actions(self):
         return self.actions("template", "edit")
+
+    @staticmethod
+    def display(text: str) -> tuple[str, dict]:
+        """(title, extra Match properties) for a result whose text is text."""
+        title, multiline = preview(text)
+        props = {"multiline": dbus.Boolean(True)} if multiline else {}
+        if re.fullmatch(r"(https?|ftp|file)://\S+", text.strip()):
+            props["urls"] = dbus.Array([text.strip()], signature="s")  # can be dragged
+        return title, props
 
     @staticmethod
     def pasting(result: tuple) -> tuple:
@@ -145,10 +156,11 @@ class Runner(dbus.service.Object):
             self.shown[match_id] = text
             about = abbr.get("description") or ("open" if opens else "copy to clipboard")
             subtext = f"{note}{name} · {about}" + (" · Enter opens it" if opens else "")
+            title, extra = self.display(split_cursor(text)[0])
             results.append((
-                match_id, one_line(split_cursor(text)[0], 200),
+                match_id, title,
                 abbr.get("icon", "internet-web-browser" if opens else "edit-paste"), shown_category,
-                relevance, {"subtext": subtext, "category": group, "actions": buttons},
+                relevance, {"subtext": subtext, "category": group, "actions": buttons, **extra},
             ))
         return [self.pasting(r) for r in results] if paste else results
 
@@ -165,10 +177,12 @@ class Runner(dbus.service.Object):
             match_id = f"{CASE_ID}{name}\x1f{text}"
             self.shown[match_id] = result
             subtext = f"{name} · {FILTERS[name][3]}" + ("" if text else " · from clipboard")
+            title, extra = self.display(result)
             results.append((
-                match_id, one_line(result, 200), case_icon(name), HIGHEST,
+                match_id, title, case_icon(name), HIGHEST,
                 1.0 - i * 0.01,  # keep CASE_FILTERS order
-                {"subtext": subtext, "category": "Change case", "actions": self.actions()},
+                {"subtext": subtext, "category": "Change case", "actions": self.actions(),
+                 **extra},
             ))
         return results
 
@@ -193,6 +207,7 @@ class Runner(dbus.service.Object):
             names = [n for n, _ in parse_filter_chain(full) if n != PASTE_WORD] or [PASTE_WORD]
             last = FILTERS[names[-1]][3]
             subtext = f"{full} · {last}" + ("" if text else " · from clipboard")
+            extra = {}
             if "|sh" in full:  # never run shell commands while typing
                 title, icon = "Press Enter to run the shell command", "system-run"
             else:
@@ -205,10 +220,11 @@ class Runner(dbus.service.Object):
                                      "actions": self.actions()}))
                     continue
                 self.shown[match_id] = result
-                title, icon = one_line(result, 200) or "(empty)", FILTER_ICON
+                title, extra = self.display(result)
+                title, icon = title or "(empty)", FILTER_ICON
             result = (
                 match_id, title, icon, HIGHEST, 1.0 - i * 0.001,  # keep FILTERS order
-                {"subtext": subtext, "category": "Filters", "actions": self.actions()},
+                {"subtext": subtext, "category": "Filters", "actions": self.actions(), **extra},
             )
             results.append(self.pasting(result) if chain_pastes(full) else result)
         return results
@@ -226,10 +242,11 @@ class Runner(dbus.service.Object):
             subtext = "current clipboard" if pos == 1 else f"#{pos} in the history"
             if lines > 1:
                 subtext += f" · {lines} lines"
+            title, extra = self.display(text)
             results.append((
-                match_id, one_line(text, 200), "klipper", HIGHEST, 1.0 - pos * 0.001,
+                match_id, title, "klipper", HIGHEST, 1.0 - pos * 0.001,
                 {"subtext": subtext, "category": "Clipboard history",
-                 "actions": self.actions()},
+                 "actions": self.actions(), **extra},
             ))
             if len(results) == CLIP_MAX:
                 break
@@ -438,6 +455,22 @@ class Runner(dbus.service.Object):
     @dbus.service.method(IFACE)
     def Teardown(self):
         self.shown = {}
+
+    @dbus.service.method(IFACE, out_signature="a{sv}")
+    def Config(self):
+        """Only queries that start with the keyword reach the runner (API DBus2)."""
+        self.cfg.reload_if_changed()
+        trigger = self.cfg.prefix
+        if not trigger:  # no keyword: every query can be an abbreviation
+            return dbus.Dictionary({}, signature="sv")
+        return dbus.Dictionary({"MatchRegex": "(?i)^" + re.escape(trigger),
+                                "MinLetterCount": dbus.Int32(len(trigger))}, signature="sv")
+
+    @dbus.service.method(IFACE, in_signature="s")
+    def SetActivationToken(self, token: str):
+        """Called just before Run: the windows that Run opens (settings, help, forms,
+        browser) take it from the environment, so they come to the front on Wayland."""
+        os.environ["XDG_ACTIVATION_TOKEN"] = token
 
 
 def run() -> None:

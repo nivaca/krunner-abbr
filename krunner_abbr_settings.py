@@ -504,6 +504,7 @@ class SettingsDialog(QDialog):
         self.paste_keys = settings.get("paste_keys", {})  # no editor: kept as loaded
         self.loading = True
         self.prefix_edit.setText(settings.get("prefix", k.DEFAULT_PREFIX))
+        self.saved_prefix = self.prefix_edit.text()
         self.min_prefix_spin.setValue(int(settings.get("min_prefix_chars", 2)))
         self.timeout_spin.setValue(float(settings.get("cmd_timeout", k.CMD_TIMEOUT)))
         self.notify_check.setChecked(bool(settings.get("notify", True)))
@@ -560,6 +561,15 @@ class SettingsDialog(QDialog):
         tmp.write_text(text)
         os.replace(tmp, self.path)
         self.set_dirty(False)
+        if settings["prefix"] != self.saved_prefix:
+            # KRunner asks the runner which queries it wants (the keyword) only when it
+            # starts: restart it, it comes back by itself the next time it's opened
+            self.saved_prefix = settings["prefix"]
+            try:
+                subprocess.Popen(["kquitapp6", "krunner"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass
         return True
 
     def accept(self):

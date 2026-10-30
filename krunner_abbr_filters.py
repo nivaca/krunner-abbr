@@ -567,6 +567,22 @@ def one_line(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def preview(text: str, lines: int = 5, limit: int = 400) -> tuple[str, bool]:
+    """(title, multiline) for showing text in KRunner.
+
+    Short one-line text stays plain. Longer text, or several lines, is shown on up to
+    `lines` lines; KRunner shows that as StyledText (a bit of HTML), so it is escaped.
+    """
+    text = text.strip("\n")
+    if "\n" not in text and len(text) <= 100:
+        return one_line(text, 200), False
+    rows = text.split("\n")
+    body = "\n".join(rows[:lines])
+    cut = len(rows) > lines or len(body) > limit
+    body = body[:limit].rstrip()
+    return html.escape(body).replace("\n", "<br>") + (" …" if cut else ""), True
+
+
 _LOCALE_LOCK = threading.Lock()  # setlocale is process-wide; lazy abbreviations run in threads
 
 

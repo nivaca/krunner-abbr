@@ -148,7 +148,13 @@ The keyword `ex` can be changed (in the settings, `prefix`). It can be a word, l
 `ex`, or a symbol, like `;`. A word needs a space after it (`ex isod`), a symbol does
 not (`;isod`). With an empty keyword, the abbreviations match directly, without
 anything before them. The names are not case-sensitive: `ex ISOD` is the same as
-`ex isod`.
+`ex isod`. When you change the keyword in the settings dialog, KRunner is restarted
+(it asks for the keyword only when it starts); it comes back the next time you open it.
+
+Results with several lines, or long ones, are shown in KRunner on up to five lines,
+so you see the letter or the BibTeX entry before copying it. A result that is a web
+address can be dragged with the mouse to the browser or to a document. In KRunner,
+`?` shows the help of all plugins; the syntax of this one is there too.
 
 Enter copies the result. To paste it also, write `|paste` at the end: `ex isod|paste`
 (see [Copying and pasting](#copying-and-pasting)).
