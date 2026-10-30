@@ -21,7 +21,7 @@ from krunner_abbr_filters import *  # noqa: F401,F403
 from krunner_abbr_match import *  # noqa: F401,F403
 from krunner_abbr_template import *  # noqa: F401,F403
 
-__version__ = "1.1"
+__version__ = "2.0"
 
 SUBTEXT_MAX = 80
 
