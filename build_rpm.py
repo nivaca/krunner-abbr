@@ -22,6 +22,9 @@ import tarfile
 from datetime import datetime
 from pathlib import Path
 
+if sys.version_info < (3, 14):
+    sys.exit("krunner-abbr needs Python 3.14 or later.")
+
 HERE = Path(__file__).resolve().parent
 NAME = "krunner-abbr"
 BUILD = HERE / "build"

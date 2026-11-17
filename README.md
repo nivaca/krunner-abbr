@@ -44,7 +44,7 @@ come from there, but it is general.
 
 - KDE Plasma 6 with KRunner (Wayland or X11). It was developed on Fedora with KWin on
   Wayland.
-- Python 3.11 or newer, with `dbus-python` and PyGObject (`python3-dbus` and
+- Python 3.14 or newer, with `dbus-python` and PyGObject (`python3-dbus` and
   `python3-gobject` on Fedora). Normally they are installed already with Plasma.
 - Klipper (the Plasma clipboard), or else `wl-clipboard` (`wl-copy`, `wl-paste`) or
   `xclip`.

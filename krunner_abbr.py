@@ -21,6 +21,9 @@ from krunner_abbr_filters import *  # noqa: F401,F403
 from krunner_abbr_match import *  # noqa: F401,F403
 from krunner_abbr_template import *  # noqa: F401,F403
 
+if sys.version_info < (3, 14):
+    sys.exit("krunner-abbr needs Python 3.14 or later.")
+
 __version__ = "2.0"
 
 SUBTEXT_MAX = 80
