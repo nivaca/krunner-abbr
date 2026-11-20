@@ -28,7 +28,7 @@ if sys.version_info < (3, 14):
 HERE = Path(__file__).resolve().parent
 NAME = "krunner-abbr"
 BUILD = HERE / "build"
-SKIP = re.compile(r"(^|/)(__pycache__|build)(/|$)|\.pyc$")
+SKIP = re.compile(r"(^|/)(__pycache__|build|dist)(/|$)|\.pyc$")
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -119,6 +119,19 @@ def main() -> None:
         run(["mock", "-r", args.mock, "--rebuild", str(srpm), "--resultdir", str(out)])
     if args.copr:
         run(["copr-cli", "build", args.copr, str(srpm)])
+
+    # The newest binary RPM goes to dist/ too, in place of the older ones (the packages
+    # stay in build/rpm/ as well).
+    binary = sorted(r for r in out.glob("*.rpm") if not r.name.endswith(".src.rpm"))
+    if binary:
+        dist = HERE / "dist"
+        dist.mkdir(exist_ok=True)
+        for old in dist.glob(f"{NAME}-*.rpm"):
+            if not old.name.endswith(".src.rpm"):
+                old.unlink()
+        for rpm in binary:
+            shutil.copy2(rpm, dist)
+        print("Copied to", dist, ":", " ".join(r.name for r in binary))
 
     print("\nPackages in", out)
     for rpm in sorted(out.glob("*.rpm")):
